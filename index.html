@@ -119,6 +119,29 @@ button.btn:disabled{opacity:.35}
 .chart div span{position:absolute;top:-16px;left:0;right:0;text-align:center;font-family:var(--mono);font-size:10px;font-weight:700}
 .chart div i{position:absolute;bottom:-16px;left:0;right:0;text-align:center;font-family:var(--mono);font-size:9px;color:var(--muted);font-style:normal}
 .chartwrap{padding:18px 0 20px}
+.mstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:10px}
+.mday{background:var(--panel);border:1px solid var(--line);padding:7px 2px;text-align:center;cursor:pointer}
+.mday.sel{border-color:var(--ink);border-width:2px;padding:6px 1px}
+.mday .dw{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.mday .dn{font-family:var(--mono);font-size:13px;font-weight:700;line-height:1.3}
+.mday .dot{width:9px;height:9px;border-radius:50%;margin:4px auto 0;background:var(--line)}
+.mbtns{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:9px}
+.mbtn{background:var(--panel);border:1px solid var(--line);padding:9px 2px;text-align:center;
+  cursor:pointer;font-size:10px;font-weight:700;letter-spacing:.02em;line-height:1.25}
+.mbtn b{display:block;font-family:var(--mono);font-size:17px;margin-bottom:2px}
+.mbtn.on{border-color:var(--ink);border-width:2px;padding:8px 1px}
+.frow{display:flex;align-items:center;gap:9px;margin-top:8px}
+.frow label{flex:1;font-size:14px}
+.frow input,.frow select{width:112px;padding:10px;font-family:var(--mono);font-size:17px;
+  font-weight:700;text-align:center;border:1px solid var(--ink);background:var(--surface);color:var(--ink)}
+.frow select{font-size:13px;text-align:left}
+.kcal{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);
+  border:1px solid var(--line);margin-top:12px}
+.kc{background:var(--surface);padding:12px 8px;text-align:center}
+.kc.big{grid-column:1/-1;background:#F5EBDA}
+.kc .v{font-family:var(--mono);font-size:25px;font-weight:700;line-height:1.1}
+.kc.big .v{font-size:33px;color:var(--amber)}
+.kc .l{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:2px}
 .reward{border-color:var(--amber);background:#F5EBDA}
 .quote{font-size:19px;line-height:1.45;font-weight:600;letter-spacing:-.01em;margin:10px 0 8px}
 .qa{font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
@@ -143,11 +166,13 @@ button.btn:disabled{opacity:.35}
   <button role="tab" id="t0" aria-selected="true" onclick="tab(0)">Сегодня</button>
   <button role="tab" id="t1" aria-selected="false" onclick="tab(1)">План</button>
   <button role="tab" id="t2" aria-selected="false" onclick="tab(2)">Прогресс</button>
+  <button role="tab" id="t3" aria-selected="false" onclick="tab(3)">Тело</button>
 </nav>
 
 <section id="v0"></section>
 <section id="v1" hidden></section>
 <section id="v2" hidden></section>
+<section id="v3" hidden></section>
 </div>
 
 <script>
@@ -172,6 +197,8 @@ function migrate(){
 var START="2026-08-15";
 var S = loadS() || migrate() || {start:START,cycles:[{push:10,pull:null,squat:null}],log:{},view:null};
 if(!S.cycles.length) S.cycles=[{push:10,pull:null,squat:null}];
+if(!S.mood) S.mood={};
+if(!S.body) S.body={h:null, age:32, act:1.725, w:{}};
 save();
 
 var EX=[
@@ -343,6 +370,31 @@ function planSquat(w,M,c){
 
 /* ═════════ сборка сессии ═════════ */
 var DAYS_MODE={};
+/* ═════════ ДОПОЛНИТЕЛЬНЫЙ БЛОК ═════════
+   Суббота — корпус. Среда — задняя поверхность бедра и боковая устойчивость.
+   Понедельник не трогаем: самый загруженный будний день.            */
+function planExtra(w,k,c){
+  var dl=(w===4), step=Math.min(c||0,4), a=[], i;
+
+  if(k==="A"){
+    var n=dl?2:3;
+    var sec=dl?15:Math.min(60, 20+5*(w-1)+5*step);
+    for(i=0;i<n;i++) a.push(P(sec+" сек",0,{small:true}));
+    return {ex:"extra", nm:"Корпус", modeName:"Полая позиция"+(dl?" · разгрузка":""),
+      sets:a, rest:75, M:"\u2014",
+      tip:"Лёжа на спине: поясница прижата к полу, лопатки и ноги оторваны от пола, руки вдоль тела. Если поясница отрывается — согни колени, так легче. Это не пресс ради пресса: без жёсткого корпуса таз провисает в отжиманиях и раскачивается на турнике."};
+  }
+
+  var nh=dl?2:3, rh=dl?5:(6+2*(w-1)+step);
+  for(i=0;i<nh;i++) a.push(P(rh+" сгиб",rh,{small:true}));
+  var sp=dl?15:Math.min(45, 20+5*(w-1)+5*step);
+  for(i=0;i<2;i++) a.push(P(sp+" сек",0,{small:true}));
+
+  return {ex:"extra", nm:"Задняя поверхность и бок", modeName:"Бицепс бедра"+(dl?" · разгрузка":""),
+    sets:a, rest:75, M:"\u2014",
+    tip:"<b>Сгибание ног со скольжением</b> — лёжа на спине, пятки на полотенце на гладком полу, поднимаешь таз и медленно выпрямляешь ноги, потом подтягиваешь пятки обратно, таз при этом не опускаешь. Это то, чего в программе не хватало: колено держится балансом квадрицепса и бицепса бедра, а тренировался у нас только первый. <b>Боковая планка</b> — на предплечье, тело в линию, время указано на каждую сторону; она укрепляет среднюю ягодичную, из-за слабости которой колено и заваливается внутрь."};
+}
+
 function session(c,w,k){
   var day=DAYS.filter(function(d){return d.k===k;})[0];
   var out={id:sid(c,w,k),c:c,w:w,k:k,date:sdate(c,w,k),dayName:day.nm,blocks:[]};
@@ -356,6 +408,7 @@ function session(c,w,k){
     p.modeName=MODE[day.map[e.k]] + (w===4?" · разгрузка":"");
     out.blocks.push(p);
   });
+  if((k==="A"||k==="C") && mOf(c,"squat")!==null) out.blocks.push(planExtra(w,k,c));
   return out;
 }
 function allSessions(nc){
@@ -482,7 +535,7 @@ function drawRest(){
 
 /* ═════════ вкладки ═════════ */
 var TAB=0;
-function tab(i){TAB=i;for(var j=0;j<3;j++){
+function tab(i){TAB=i;for(var j=0;j<4;j++){
   document.getElementById("t"+j).setAttribute("aria-selected",j===i?"true":"false");
   document.getElementById("v"+j).hidden=(j!==i);} render();}
 
@@ -544,6 +597,75 @@ function hardReset(){
   mem=null;location.reload();
 }
 
+/* ═════════ НАСТРОЕНИЕ ═════════ */
+var MOODS=[
+  {v:1,t:"Тяжело",  c:"#A33B2A"},
+  {v:2,t:"Вяло",    c:"#B06A2E"},
+  {v:3,t:"Ровно",   c:"#8A8F84"},
+  {v:4,t:"Хорошо",  c:"#5C8F5E"},
+  {v:5,t:"Отлично", c:"#2F7A4F"}
+];
+var MSEL=null;
+function moodColor(v){ for(var i=0;i<MOODS.length;i++) if(MOODS[i].v===v) return MOODS[i].c; return null; }
+function moodDays(n){
+  var out=[], t=today();
+  for(var i=n-1;i>=0;i--) out.push(addD(t,-i));
+  return out;
+}
+function selDay(){ return MSEL || today(); }
+function pickDay(d){ MSEL=d; render(); }
+function setMood(v){
+  var d=selDay();
+  if(S.mood[d]===v) delete S.mood[d]; else S.mood[d]=v;
+  save(); render();
+}
+function moodStats(n){
+  var days=moodDays(n), tr=[], rest=[], all=[];
+  var trainDates={};
+  for(var k in S.log) if(S.log[k].done && S.log[k].date) trainDates[S.log[k].date]=1;
+  days.forEach(function(d){
+    var m=S.mood[d]; if(m==null) return;
+    all.push(m); (trainDates[d]?tr:rest).push(m);
+  });
+  function avg(a){ return a.length? (a.reduce(function(x,y){return x+y;},0)/a.length) : null; }
+  return {all:avg(all), train:avg(tr), rest:avg(rest), n:all.length, nt:tr.length};
+}
+
+/* ═════════ ТЕЛО И КАЛОРИИ ═════════
+   Формула Миффлина–Сан Жеора — сейчас основная в диетологии.
+   Даёт оценку, а не истину: реальная поправка приходит от весов. */
+function lastWeight(){
+  var ks=Object.keys(S.body.w||{}).sort();
+  return ks.length ? S.body.w[ks[ks.length-1]] : null;
+}
+function setBody(field, val){
+  var v=parseFloat(String(val).replace(",","."));
+  if(field==="w"){
+    if(isNaN(v)||v<30||v>250) return;
+    S.body.w[today()]=Math.round(v*10)/10;
+  } else {
+    if(isNaN(v)) return;
+    S.body[field]=v;
+  }
+  save(); render();
+}
+function calc(){
+  var w=lastWeight(), h=S.body.h, age=S.body.age, act=S.body.act;
+  if(!w||!h) return null;
+  var bmr = 10*w + 6.25*h - 5*age + 5;
+  var tdee = bmr*act;
+  var gain = tdee + 300;
+  var prot = Math.round(w*1.8);
+  var fat  = Math.round(w*1.0);
+  var carb = Math.round((gain - prot*4 - fat*9)/4);
+  return {
+    bmr:Math.round(bmr), tdee:Math.round(tdee), gain:Math.round(gain),
+    prot:prot, fat:fat, carb:Math.max(0,carb),
+    water:Math.round((w*35+600)/100)*100,
+    weekGain:Math.round(w*0.004*10)/10
+  };
+}
+
 /* ═════════ отрисовка ═════════ */
 function render(){
   var c=curCycle(), r=currentRef();
@@ -551,13 +673,41 @@ function render(){
   document.getElementById("mPush").textContent  = mOf(c,"push")==null?"—":mOf(c,"push");
   document.getElementById("mSquat").textContent = mOf(c,"squat")==null?"—":mOf(c,"squat");
   document.getElementById("hCyc").textContent="· цикл "+(r.c+1)+" · неделя "+r.w;
-  if(TAB===0) renderToday(); if(TAB===1) renderPlan(); if(TAB===2) renderProgress();
+  if(TAB===0) renderToday(); if(TAB===1) renderPlan();
+  if(TAB===2) renderProgress(); if(TAB===3) renderBody();
 }
+
+function moodCard(){
+  var d=selDay(), t=today(), h="";
+  h+='<div class="card"><div class="eyebrow">Настроение</div>';
+  h+='<div class="mstrip">';
+  moodDays(7).forEach(function(x){
+    var m=S.mood[x], col=moodColor(m);
+    h+='<div class="mday'+(x===d?' sel':'')+'" onclick="pickDay(\''+x+'\')">'+
+       '<div class="dw">'+(x===t?"сег":wdShort(x))+'</div>'+
+       '<div class="dn">'+x.split("-")[2]+'</div>'+
+       '<div class="dot"'+(col?' style="background:'+col+'"':'')+'></div></div>';
+  });
+  h+='</div>';
+  h+='<div class="mbtns">';
+  MOODS.forEach(function(m){
+    var on=(S.mood[d]===m.v);
+    h+='<div class="mbtn'+(on?' on':'')+'" onclick="setMood('+m.v+')"'+
+       (on?' style="background:'+m.c+'22;border-color:'+m.c+'"':'')+'>'+
+       '<b style="color:'+m.c+'">'+m.v+'</b>'+m.t+'</div>';
+  });
+  h+='</div>';
+  h+='<div class="note">'+(d===t?"Отмечай в конце дня — так честнее.":"Отмечаешь "+fmt(d)+". Нажми на «сег», чтобы вернуться к сегодняшнему дню.")+'</div>';
+  h+='</div>';
+  return h;
+}
+var WDS=["вс","пн","вт","ср","чт","пт","сб"];
+function wdShort(x){ return WDS[s2d(x).getUTCDay()]; }
 
 function renderToday(){
   var r=currentRef(), s=session(r.c,r.w,r.k), L=S.log[s.id]||{}, t=today();
   var when = s.date===t?"Сегодня":(s.date<t?"Пропущено · "+fmt(s.date):fmt(s.date));
-  var h="";
+  var h=moodCard();
 
   h+='<div class="card"><div class="eyebrow">'+when+' · '+s.dayName+' · цикл '+(s.c+1)+' · неделя '+s.w+'</div>';
 
@@ -661,9 +811,90 @@ function renderPlan(){
   document.getElementById("v1").innerHTML=h;
 }
 
+function renderBody(){
+  var h="", w=lastWeight(), b=S.body, c=calc();
+
+  h+='<div class="card"><div class="eyebrow">Данные для расчёта</div>';
+  h+='<div class="frow"><label>Вес сегодня, кг</label>'+
+     '<input type="number" step="0.1" inputmode="decimal" value="'+(w!=null?w:"")+'" '+
+     'placeholder="72.5" onchange="setBody(\'w\',this.value)"></div>';
+  h+='<div class="frow"><label>Рост, см</label>'+
+     '<input type="number" inputmode="numeric" value="'+(b.h||"")+'" placeholder="175" '+
+     'onchange="setBody(\'h\',this.value)"></div>';
+  h+='<div class="frow"><label>Возраст</label>'+
+     '<input type="number" inputmode="numeric" value="'+(b.age||"")+'" '+
+     'onchange="setBody(\'age\',this.value)"></div>';
+  h+='<div class="frow"><label>Активность</label><select onchange="setBody(\'act\',this.value)">'+
+     '<option value="1.375"'+(b.act==1.375?" selected":"")+'>Сидячая работа</option>'+
+     '<option value="1.55"'+(b.act==1.55?" selected":"")+'>Умеренная</option>'+
+     '<option value="1.725"'+(b.act==1.725?" selected":"")+'>Высокая: на ногах весь день</option>'+
+     '<option value="1.9"'+(b.act==1.9?" selected":"")+'>Очень высокая: тяжёлый физический труд</option>'+
+     '</select></div>';
+  h+='<div class="note">Активность считается по работе, а не по тренировкам — три занятия в неделю уже учтены в коэффициенте. При выездах на подстанции с ходьбой по 8 км это «высокая».</div>';
+  h+='</div>';
+
+  if(!c){
+    h+='<div class="card"><div class="note">Заполни вес и рост — появится расчёт.</div></div>';
+    document.getElementById("v3").innerHTML=h; return;
+  }
+
+  h+='<div class="card"><div class="eyebrow">Норма на день</div>';
+  h+='<div class="kcal">';
+  h+='<div class="kc big"><div class="v">'+c.gain+'</div><div class="l">ккал для набора</div></div>';
+  h+='<div class="kc"><div class="v">'+c.tdee+'</div><div class="l">поддержание</div></div>';
+  h+='<div class="kc"><div class="v">'+c.bmr+'</div><div class="l">основной обмен</div></div>';
+  h+='<div class="kc"><div class="v">'+c.prot+' г</div><div class="l">белок</div></div>';
+  h+='<div class="kc"><div class="v">'+c.fat+' г</div><div class="l">жиры</div></div>';
+  h+='<div class="kc"><div class="v">'+c.carb+' г</div><div class="l">углеводы</div></div>';
+  h+='<div class="kc"><div class="v">'+(c.water/1000).toFixed(1)+' л</div><div class="l">вода</div></div>';
+  h+='</div>';
+  h+='<div class="note">Это оценка, а не истина: формула ошибается на 10–15% в обе стороны. Настоящий ответ дают весы. Если через две недели вес стоит — прибавь 200 ккал. Если растёт быстрее '+c.weekGain+' кг в неделю, значит набирается лишний жир — убери 200.</div>';
+  h+='</div>';
+
+  h+='<div class="card"><div class="eyebrow">Про темп набора</div><div class="hint">'+
+     'Цель — примерно <b>'+c.weekGain+' кг в неделю</b>, это около '+(c.weekGain*4).toFixed(1)+' кг в месяц. '+
+     'Медленнее — не наберёшь, быстрее — наберёшь жиром. И помни про турник: каждый лишний килограмм тела прямо отнимает повторения в подтягиваниях, поэтому спешка тут работает против твоей первой цели.'+
+     '</div></div>';
+
+  // вес по дням
+  var ks=Object.keys(b.w||{}).sort();
+  if(ks.length>1){
+    var vals=ks.map(function(k){return b.w[k];});
+    var mn=Math.min.apply(null,vals), mx=Math.max.apply(null,vals), rng=Math.max(1,mx-mn);
+    h+='<div class="card"><div class="eyebrow">Вес · '+ks.length+' записей</div><div class="chartwrap"><div class="chart">';
+    ks.slice(-10).forEach(function(k){
+      var v=b.w[k], pct=15+((v-mn)/rng)*85;
+      h+='<div style="height:'+pct+'%"><span>'+v+'</span><i>'+fmt(k)+'</i></div>';
+    });
+    h+='</div></div></div>';
+  }
+
+  // настроение
+  var st=moodStats(30);
+  h+='<div class="card"><div class="eyebrow">Настроение за 30 дней</div>';
+  if(st.n<3){
+    h+='<div class="hint">Отмечено дней: '+st.n+'. Когда наберётся хотя бы неделя, здесь появится средняя и сравнение тренировочных дней с остальными.</div>';
+  }else{
+    h+='<div class="stats">'+
+       '<div class="stat"><div class="v">'+st.all.toFixed(1)+'</div><div class="l">в среднем</div></div>'+
+       '<div class="stat"><div class="v">'+(st.train!=null?st.train.toFixed(1):"—")+'</div><div class="l">в дни тренировок</div></div>'+
+       '<div class="stat"><div class="v">'+(st.rest!=null?st.rest.toFixed(1):"—")+'</div><div class="l">в остальные</div></div></div>';
+    h+='<div class="chartwrap" style="padding-top:6px"><div class="chart" style="height:70px;gap:2px">';
+    moodDays(30).forEach(function(d){
+      var m=S.mood[d];
+      h+='<div style="height:'+(m?(m/5*100):2)+'%;background:'+(m?moodColor(m):"var(--line)")+'"></div>';
+    });
+    h+='</div></div>';
+    h+='<div class="hint">Настроение падает раньше, чем падают цифры в подходах. Если несколько дней подряд на единице-двойке, а тренировки идут через силу — это не лень, это накопленная усталость: недосып, недоед или перебор объёма. Разгрузочная неделя существует ровно для этого.</div>';
+  }
+  h+='</div>';
+
+  document.getElementById("v3").innerHTML=h;
+}
+
 function renderProgress(){
   var h="", sess=0, reps=0;
-  for(var k in S.log){ if(S.log[k].done){ sess++; ["pull","push","squat"].forEach(function(e){
+  for(var k in S.log){ if(S.log[k].done){ sess++; ["pull","push","squat","extra"].forEach(function(e){
     (S.log[k][e]||[]).forEach(function(v){ if(v) reps+=v; }); }); } }
 
   h+='<div class="card"><div class="eyebrow">Итого</div>';
