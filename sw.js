@@ -1,7 +1,7 @@
 /* Офлайн-кэш приложения.
    Меняешь index.html — подними номер версии на строке ниже,
    иначе телефон может продолжить показывать старую копию. */
-const VERSION = "v1";
+const VERSION = "v4";
 const CACHE = "trener3-" + VERSION;
 
 const ASSETS = [
@@ -57,5 +57,16 @@ self.addEventListener("fetch", (e) => {
       caches.open(CACHE).then((c) => c.put(req, copy));
       return res;
     }).catch(() => hit))
+  );
+});
+
+/* Клик по уведомлению — открыть приложение, а не новую вкладку. */
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) if ("focus" in c) return c.focus();
+      if (self.clients.openWindow) return self.clients.openWindow("./");
+    })
   );
 });
