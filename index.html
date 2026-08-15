@@ -798,7 +798,7 @@ function renderPlan(){
           if(b.locked){ h+=b.nm.toLowerCase()+" — ждёт теста<br>"; return; }
           var g={},or=[];
           b.sets.forEach(function(x){ var key=x.amrap?"макс":x.t; if(!g[key]){g[key]=0;or.push(key);} g[key]++; });
-          h+=b.nm.toLowerCase()+" · "+MODE[b.mode].toLowerCase()+": "+
+          h+=b.nm.toLowerCase()+" · "+String(MODE[b.mode]||b.modeName||"").toLowerCase()+": "+
              or.map(function(k){return g[k]>1?g[k]+"×"+k:k;}).join(", ")+"<br>";
         });
         h+='</div>';

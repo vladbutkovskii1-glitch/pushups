@@ -1,7 +1,7 @@
 /* Офлайн-кэш приложения.
    Меняешь index.html — подними номер версии на строке ниже,
    иначе телефон может продолжить показывать старую копию. */
-const VERSION = "v6";
+const VERSION = "v7";
 const CACHE = "trener3-" + VERSION;
 
 const ASSETS = [
