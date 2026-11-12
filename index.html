@@ -5,17 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#DDE0D8">
+<meta name="theme-color" content="#EEE8DF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121417" media="(prefers-color-scheme: dark)">
+<script>
+/* Тема выставляется до отрисовки, чтобы не мигало светлым при запуске. */
+try{ var th=localStorage.getItem("trener3-theme"); if(th==="light"||th==="dark") document.documentElement.setAttribute("data-theme", th); }catch(e){}
+</script>
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" href="./icon-192.png">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <title>Три упражнения</title>
 <style>
 :root{
-  --panel:#DDE0D8; --surface:#F6F7F3; --ink:#171A16; --muted:#6C7167;
-  --line:#C2C7BB; --amber:#C97C00; --green:#2F7A4F; --red:#A33B2A; --blue:#3A5C7A;
+  /* Светлая тема «Песок». Все цвета приложения — только отсюда. */
+  --panel:#EEE8DF; --surface:#FBF8F3; --set:#F3EEE6; --ink:#2B2622; --muted:#7E7469; --line:#DCD2C4;
+  --amber:#C4572F; --green:#3E8B5F; --red:#B23B2C; --blue:#3F6E8C;
+  --amber-soft:#F7E4D9; --green-soft:#E2EFE6; --on-accent:#FFFFFF; --btn:#2B2622; --btn-ink:#FBF8F3;
+  --m1:#B23B2C; --m2:#C9773A; --m3:#9C9286; --m4:#6E9F6E; --m5:#3E8B5F;
+  color-scheme:light;
   --mono: ui-monospace,"SF Mono","Roboto Mono","DejaVu Sans Mono",monospace;
   --sans: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+/* Тёмная тема «Графит»: по теме телефона, либо выбрана вручную во вкладке «Прогресс». */
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --panel:#121417; --surface:#1B1F24; --set:#232930; --ink:#E8EBEE; --muted:#8B949E; --line:#313840;
+  --amber:#F0A54A; --green:#5CC48A; --red:#E5675A; --blue:#6EA8D8;
+  --amber-soft:#2D2416; --green-soft:#16281F; --on-accent:#121417; --btn:#F0A54A; --btn-ink:#121417;
+  --m1:#E5675A; --m2:#E0944F; --m3:#8B949E; --m4:#8FC98F; --m5:#5CC48A;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --panel:#121417; --surface:#1B1F24; --set:#232930; --ink:#E8EBEE; --muted:#8B949E; --line:#313840;
+  --amber:#F0A54A; --green:#5CC48A; --red:#E5675A; --blue:#6EA8D8;
+  --amber-soft:#2D2416; --green-soft:#16281F; --on-accent:#121417; --btn:#F0A54A; --btn-ink:#121417;
+  --m1:#E5675A; --m2:#E0944F; --m3:#8B949E; --m4:#8FC98F; --m5:#5CC48A;
+  color-scheme:dark;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -51,25 +75,25 @@ h3.ex em{font-style:normal;font-size:12px;letter-spacing:.14em;text-transform:up
 .exhead{border-left:3px solid var(--ink);padding-left:9px;margin-bottom:2px}
 
 .sets{display:grid;grid-template-columns:repeat(auto-fit,minmax(102px,1fr));gap:8px;margin-top:11px}
-.set{position:relative;background:var(--panel);border:1px solid var(--line);
+.set{position:relative;background:var(--set);border:1px solid var(--line);
   padding:14px 6px 12px;text-align:center;cursor:pointer;font-family:var(--mono);
   transition:background .12s,border-color .12s}
 .set .lamp{position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;
-  background:var(--line);border:1px solid rgba(0,0,0,.18)}
+  background:var(--line);border:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
 .set .n{font-size:11px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;
   font-family:var(--sans);font-weight:700}
 .set .r{font-size:29.5px;font-weight:700;line-height:1.15;letter-spacing:-.02em}
 .set .r.sm{font-size:17.5px;line-height:1.25;padding-top:3px}
 .set .u{font-size:11.5px;color:var(--muted)}
-.set.done{background:#E6EDE7;border-color:var(--green)}
-.set.done .lamp{background:var(--green);box-shadow:0 0 7px rgba(47,122,79,.6)}
+.set.done{background:var(--green-soft);border-color:var(--green)}
+.set.done .lamp{background:var(--green);box-shadow:0 0 7px color-mix(in srgb,var(--green) 60%,transparent)}
 .set.done .r{color:var(--green)}
-.set.active{border-color:var(--amber);background:#F5EBDA}
-.set.active .lamp{background:var(--amber);box-shadow:0 0 7px rgba(201,124,0,.7)}
+.set.active{border-color:var(--amber);background:var(--amber-soft)}
+.set.active .lamp{background:var(--amber);box-shadow:0 0 7px color-mix(in srgb,var(--amber) 70%,transparent)}
 .set .tag{font-size:11px;letter-spacing:.08em;color:var(--amber);font-weight:700;font-family:var(--sans)}
 
 .rest{position:sticky;bottom:0;margin-top:12px;border:1px solid var(--amber);
-  background:#F5EBDA;padding:10px 12px;display:none;z-index:5}
+  background:var(--amber-soft);padding:10px 12px;display:none;z-index:5}
 .rest.on{display:block}
 .rest .row{display:flex;justify-content:space-between;align-items:baseline}
 .rest .t{font-family:var(--mono);font-size:35px;font-weight:700;line-height:1}
@@ -77,7 +101,7 @@ h3.ex em{font-style:normal;font-size:12px;letter-spacing:.14em;text-transform:up
 .bar{height:4px;background:var(--line);margin-top:8px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--amber);transition:width .95s linear}
 
-button.btn{display:block;width:100%;padding:13px;background:var(--ink);color:var(--surface);
+button.btn{display:block;width:100%;padding:13px;background:var(--btn);color:var(--btn-ink);
   border:none;font-family:var(--sans);font-size:14.5px;font-weight:700;letter-spacing:.12em;
   text-transform:uppercase;cursor:pointer;margin-top:10px}
 button.btn.ghost{background:none;color:var(--ink);border:1px solid var(--ink)}
@@ -103,7 +127,7 @@ button.btn:disabled{opacity:.35}
   margin:4px 0 0 68px;line-height:1.6}
 .sess.ok .nm{color:var(--green)}
 .sess.ok .d::after{content:" ✓";color:var(--green)}
-.sess.now{background:#F5EBDA;margin:0 -8px;padding:8px}
+.sess.now{background:var(--amber-soft);margin:0 -8px;padding:8px}
 
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
 .stats.two{grid-template-columns:repeat(2,1fr)}
@@ -141,11 +165,11 @@ button.btn:disabled{opacity:.35}
 .kcal{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);
   border:1px solid var(--line);margin-top:12px}
 .kc{background:var(--surface);padding:12px 8px;text-align:center}
-.kc.big{grid-column:1/-1;background:#F5EBDA}
+.kc.big{grid-column:1/-1;background:var(--amber-soft)}
 .kc .v{font-family:var(--mono);font-size:27.5px;font-weight:700;line-height:1.1}
 .kc.big .v{font-size:36.5px;color:var(--amber)}
 .kc .l{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:2px}
-.reward{border-color:var(--amber);background:#F5EBDA}
+.reward{border-color:var(--amber);background:var(--amber-soft)}
 .quote{font-size:21px;line-height:1.45;font-weight:600;letter-spacing:-.01em;margin:10px 0 8px}
 .qa{font-size:14px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
 .hint{font-size:15px;color:var(--muted);line-height:1.55;margin-top:12px}
@@ -156,7 +180,7 @@ button.btn:disabled{opacity:.35}
 .warn{border-left:3px solid var(--amber);padding-left:10px;margin-top:10px;font-size:15.5px;line-height:1.5;color:var(--muted)}
 
 /* ── знаки отличия ── */
-.medal{border:2px solid var(--amber);background:#F5EBDA;padding:16px 14px;margin-bottom:12px}
+.medal{border:2px solid var(--amber);background:var(--amber-soft);padding:16px 14px;margin-bottom:12px}
 .medal .k{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);font-weight:800}
 .medal h2{font-size:26px;margin:6px 0 4px;line-height:1.15}
 .medal .ton{font-family:var(--mono);font-size:16.5px;font-weight:700;color:var(--ink);margin-top:6px}
@@ -167,7 +191,7 @@ button.btn:disabled{opacity:.35}
 .awrow{display:grid;gap:4px}
 .aw{background:var(--panel);border:1px solid var(--line);padding:9px 1px 7px;text-align:center;
   font-family:var(--mono);font-size:13px;font-weight:700;color:var(--muted);line-height:1.2}
-.aw.got{background:var(--amber);border-color:var(--amber);color:#fff}
+.aw.got{background:var(--amber);border-color:var(--amber);color:var(--on-accent)}
 .aw.next{border-color:var(--amber);border-width:2px;color:var(--amber);padding:8px 0 6px}
 .aw .dt{display:block;font-size:9px;font-weight:400;opacity:.85;margin-top:2px}
 </style>
@@ -290,11 +314,11 @@ var RUNG_LINES = [
 ];
 
 var MOODS = [
-  {v:1, t:"Тяжело",  c:"#A33B2A"},
-  {v:2, t:"Вяло",    c:"#B06A2E"},
-  {v:3, t:"Ровно",   c:"#8A8F84"},
-  {v:4, t:"Хорошо",  c:"#5C8F5E"},
-  {v:5, t:"Отлично", c:"#2F7A4F"}
+  {v:1, t:"Тяжело",  c:"var(--m1)"},
+  {v:2, t:"Вяло",    c:"var(--m2)"},
+  {v:3, t:"Ровно",   c:"var(--m3)"},
+  {v:4, t:"Хорошо",  c:"var(--m4)"},
+  {v:5, t:"Отлично", c:"var(--m5)"}
 ];
 
 var QUOTES = [
@@ -1823,6 +1847,23 @@ function importData(inp){
   };
   rd.readAsText(f);
 }
+/* Тема: "auto" — как в телефоне, "light" — Песок, "dark" — Графит.
+   Хранится отдельно от данных, чтобы импорт копии её не трогал. */
+function themeGet(){ try{ return localStorage.getItem("trener3-theme") || "auto"; }catch(e){ return "auto"; } }
+function themeApply(){
+  var t=themeGet(), root=document.documentElement;
+  if(t==="auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", t);
+  var dark = t==="dark" || (t==="auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  var metas=document.querySelectorAll('meta[name="theme-color"]');
+  for(var i=0;i<metas.length;i++){
+    metas[i].setAttribute("content", dark ? "#121417" : "#EEE8DF");
+    if(t!=="auto") metas[i].removeAttribute("media");
+  }
+}
+function setTheme(t){
+  try{ if(t==="auto") localStorage.removeItem("trener3-theme"); else localStorage.setItem("trener3-theme", t); }catch(e){}
+  themeApply(); render();
+}
 function hardReset(){
   if(!confirm("Стереть всю историю и начать заново?")) return;
   try{ localStorage.removeItem(CFG.storeKey); }catch(e){}
@@ -1876,7 +1917,7 @@ function moodCard(){
   MOODS.forEach(function(m){
     var on=(S.mood[d]===m.v);
     h+='<div class="mbtn'+(on?' on':'')+'" onclick="setMood('+m.v+')"'+
-       (on?' style="background:'+m.c+'22;border-color:'+m.c+'"':'')+'>'+
+       (on?' style="background:color-mix(in srgb,'+m.c+' 14%,transparent);border-color:'+m.c+'"':'')+'>'+
        '<b style="color:'+m.c+'">'+m.v+'</b>'+m.t+'</div>';
   });
   h+='</div><div class="note">'+
@@ -2169,6 +2210,12 @@ function renderProgress(){
     h+='<button class="btn ghost sm" onclick="askNotify()">Разрешить уведомления</button>';
   }
   h+='</div>';
+
+  var th=themeGet();
+  h+='<div class="card"><div class="eyebrow">Оформление</div><div class="mbtns" style="grid-template-columns:repeat(3,1fr)">'+
+     [["auto","Как в телефоне"],["light","Светлая"],["dark","Тёмная"]].map(function(o){
+       return '<div class="mbtn'+(th===o[0]?' on':'')+'" onclick="setTheme(\''+o[0]+'\')">'+o[1]+'</div>';
+     }).join('')+'</div><div class="hint">«Как в телефоне» переключает сама: днём светлая, когда телефон в тёмном режиме — тёмная.</div></div>';
 
   h+='<div class="card"><div class="eyebrow">Цитаты</div><div class="hint">Открыто '+
      (S.seen||[]).length+' из '+QUOTES.length+'. Повторов не будет, пока не закончится весь список.</div></div>';
@@ -2623,6 +2670,7 @@ function runSelfTest(){
 /* ═════════ 12. СТАРТ ═════════ */
 
 bootState();
+themeApply();
 /* Первый запуск новой версии: выдаём знаки за уже взятые пороги молча,
    чтобы не вываливать на человека стену карточек. */
 if(!S.awardsInit){ checkAwards(false); S.awardsInit = true; save(); }
