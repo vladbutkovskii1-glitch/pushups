@@ -150,6 +150,9 @@ button.btn:disabled{opacity:.35}
 .qa{font-size:14px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
 .hint{font-size:15px;color:var(--muted);line-height:1.55;margin-top:12px}
 .hint b{color:var(--ink)}
+.wu{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
+.wu summary{font-family:var(--mono);font-size:14px;cursor:pointer;color:var(--ink)}
+.wu ol{margin:8px 0 0;padding-left:22px;font-size:15.5px;line-height:1.5;color:var(--muted)}
 .warn{border-left:3px solid var(--amber);padding-left:10px;margin-top:10px;font-size:15.5px;line-height:1.5;color:var(--muted)}
 
 /* ── знаки отличия ── */
@@ -229,7 +232,14 @@ var CFG = {
   start:      "2026-08-15",   /* суббота первой недели первого цикла */
   cycleWeeks: 4,              /* последняя неделя цикла — разгрузочная */
   aheadCycles:3,              /* сколько циклов вперёд держать в календаре */
-  body:       {h:null, age:32, act:1.725}   /* значения по умолчанию */
+  body:       {h:null, age:32, act:1.725},  /* значения по умолчанию */
+  /* Лимит одной тренировки, вместе с разминкой и отдыхом. Разминка и переход
+     между упражнениями входят в счёт. */
+  session:    {budget:40*60, warmup:300, switchSec:60},
+  /* Если в тесте цикла нет виса (тесты до этой версии), фаза 0 подтягиваний
+     строится от этого значения. Без планки корпус идёт по старой схеме:
+     прибавка каждую неделю и каждый цикл. */
+  testDefaults:{hang:25}
 };
 
 /* Дни недели и распределение режимов: A = сила, B = объём, C = техника.
@@ -346,7 +356,11 @@ var QUOTES = [
    Схема v2.
      S = {
        v:2, start:"ГГГГ-ММ-ДД",
-       cycles:[ {pull:N, push:N, squat:N, date:"..."} ],   // максимумы по циклам
+       cycles:[ {pull:N, push:N, squat:N, plank:сек, hang:сек, date:"...", auto:bool} ],
+                                    // auto — цикл собран программой из подходов «МАКС»
+                                    // прошлого цикла, а не сдан отдельным тестом
+                                    // тест цикла; plank и hang могут отсутствовать
+                                    // в тестах до v3 приложения — тогда работают запасные значения
        log:{ "цикл-неделя-день": {
                done:bool, date:"...", quote:N|null,
                plan:[ блок ]|null,        // замораживается при первой отметке
@@ -458,6 +472,7 @@ function bootState(){
   if(!S.awards) S.awards = {};
   if(!S.pending)S.pending= [];
   if(!S.seen)   S.seen   = [];
+  rollCycles();
   save();
 }
 
@@ -511,15 +526,35 @@ function currentRef(){
 
 /* ═════════ 4. ПЛАН ═════════
 
-   Каждый генератор получает ctx = {mode, w, M, c, dl} и возвращает
-   {sets, rest, tip, phase?}. Режим передаётся аргументом — никаких
-   глобальных переменных, которые надо выставить перед вызовом.
+   Каждый генератор получает ctx = {mode, w, M, c, dl, T} и возвращает
+   {sets, rest, tip, phase?}. T — весь тест этого цикла, включая планку
+   и вис: они не упражнения программы, но по ним строятся корпус и фаза 0
+   подтягиваний. Режим передаётся аргументом — никаких глобальных переменных.
 
-   Флаг aux у подхода означает «это не само упражнение, а подводящее».
-   Такие подходы не идут в счётчики повторений и в тоннаж.               */
+   Поля подхода:
+     t    — текст на кнопке; v — повторений в счёт;
+     aux  — подводящее движение, в счётчики и тоннаж не идёт;
+     g    — группа внутри блока (main, bridge, hang…). По ней объём урезается
+            под лимит времени; последний подход группы не снимается никогда;
+     dur  — сколько секунд длится сам подход, без отдыха.
 
-function P(text, val, o){ var s={t:text, v:val}; if(o) for(var k in o) s[k]=o[k]; return s; }
+   Длительность тренировки = разминка + работа + отдых между подходами +
+   переходы между упражнениями. Если выходит больше CFG.session.budget,
+   fitBudget() снимает подходы: сначала дополнительный блок, потом дни объёма,
+   потом техники, силовую работу — в последнюю очередь. Если и этого мало,
+   укорачивает отдых до нижней границы.                                    */
+
+/* Секунды на одно повторение. Оценка, а не секундомер: важен порядок
+   величин (темповое приседание в разы дольше обычного), а не точность. */
+var SPR = {push:2.5, pushSlow:6, pull:3.5, pullSlow:6, squat:2.5, squatTempo:7,
+           squatSlow:6.5, band:3, scap:2.5, bridge:2.5, curl:4};
+
+function P(text, val, o){ var s={t:text, v:val, g:"main", dur:0}; if(o) for(var k in o) s[k]=o[k]; return s; }
+function R(text, reps, spr, o){ var s=P(text, reps, o); s.dur=Math.round(reps*spr); return s; }
+function H(text, sec, o){ var s=P(text, 0, o); s.dur=sec; s.small=true; return s; }
 function pick(w, arr){ return arr[w-1]; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function tval(x, key){ var T=x.T||{}; return (T[key]!=null) ? T[key] : CFG.testDefaults[key]; }
 
 /* ── ОТЖИМАНИЯ ── подводящих вариантов нет, всё идёт в счёт */
 function pushPlan(x){
@@ -527,96 +562,110 @@ function pushPlan(x){
   if(m==="A"){
     [0.6,0.7,0.6,0.5].forEach(function(f){
       var r=Math.max(1, Math.round(M*f*(dl?0.6:1))+bump);
-      a.push(P(String(r), r));
+      a.push(R(String(r), r, SPR.push));
     });
-    if(!dl) a.push(P("МАКС", M+Math.max(0,w-2), {amrap:true, est:M+Math.max(0,w-2), small:true}));
-    return {sets:a, rest:170,
+    if(!dl){ var e=M+Math.max(0,w-2); a[a.length-1].ra=180;
+             a.push(R("МАКС", e, SPR.push, {amrap:true, est:e, small:true})); }
+    return {sets:a, rest:105,
       tip: dl ? "Разгрузка. Легко, без максимума."
               : (M>40 ? "Максимум больше 40 — ставь ноги на возвышение 40–50 см или надевай рюкзак 5–10 кг, подходы по 8–12."
-                      : "Отдых 2,5–3 мин. В последнем подходе оставь 1–2 повторения в запасе.")};
+                      : "Отдых 1,5–2 мин: эти подходы далеки от отказа. Перед последним — 3 мин, и в нём выкладывайся: по нему программа обновит твой максимум на следующий цикл.")};
   }
   if(m==="B"){
-    var base = M<=20?10 : (M<=40?8:7);
-    var n = dl?6:(base+(w-1)), r = Math.max(1, Math.round(M*0.4));
-    for(i=0;i<n;i++) a.push(P(String(r), r));
-    return {sets:a, rest:75, tip:"Отдых 60–90 сек. Здесь не тяжело — здесь много."};
+    var n = dl?4:(w===1?5:6);
+    var r = Math.max(1, Math.round(M*(dl?0.45:0.55+0.025*(w-1))));
+    for(i=0;i<n;i++) a.push(R(String(r), r, SPR.push));
+    return {sets:a, rest:60, tip:"Отдых ровно 60 сек — в этом и смысл: первые подходы лёгкие, последние уже нет. Если в последних не добираешь повторения — это нормально, делай сколько чисто."};
   }
   var n2 = dl?3:5, r2 = Math.max(1, Math.round(M*0.4));
-  for(i=0;i<n2;i++) a.push(P(String(r2), r2));
+  for(i=0;i<n2;i++) a.push(R(String(r2), r2, SPR.pushSlow));
   var v = ["узкая постановка рук","широкая постановка рук","ноги на возвышении 20–30 см","пауза 2 сек внизу"][w-1];
-  return {sets:a, rest:120, tip:"3 сек вниз, пауза грудью у пола, вверх мощно. Вариант недели — "+v+"."};
+  return {sets:a, rest:90, tip:"3 сек вниз, пауза грудью у пола, вверх мощно. Вариант недели — "+v+"."};
 }
 
 /* ── ПОДТЯГИВАНИЯ ── три фазы: до первого, до пятого, дальше проценты.
-   В фазе 0 в счёт не идёт ничего: негативы, австралийские и лопаточные —
-   это подводящие движения, а не подтягивания. Поэтому счётчик стоит на нуле
-   ровно до того дня, когда появится первое чистое повторение.            */
+   В фазе 0 в счёт не идёт ничего: негативы, тяга резинки и лопаточные —
+   подводящие движения. Счётчик стоит на нуле ровно до первого чистого
+   повторения. Длительность негативов и виса берётся из теста виса.      */
+var BAND_TIP = "<b>Тяга резинки в наклоне</b> — резинка закреплена на уровне пояса, корпус наклонён на 30–45°, спина прямая, тянешь к низу груди, локти назад вдоль тела, в конце своди лопатки. Назад 2–3 секунды. Тяжелее — отойди дальше от крепления.";
+
 function pullPhase(M){ return M===0 ? 0 : (M<5 ? 1 : 2); }
+function negSec(hang){ return hang<10 ? 3 : (hang<20 ? 4 : (hang<30 ? 5 : 6)); }
+function hangHold(hang, w, dl){
+  return dl ? clamp(Math.round(hang*0.5), 10, 30)
+            : clamp(Math.round(hang*0.6)+3*(w-1), 10, 45);
+}
 function pullPlan(x){
-  var m=x.mode, w=x.w, M=x.M, dl=x.dl, a=[], i, ph=pullPhase(M);
+  var m=x.mode, w=x.w, M=x.M, dl=x.dl, a=[], i, ph=pullPhase(M), hang=tval(x,"hang");
 
   if(ph===0){
     if(m==="A"){
-      var n=pick(w,[4,5,5,3]), r=pick(w,[3,3,4,3]), sec=pick(w,[5,5,6,5]);
-      for(i=0;i<n;i++) a.push(P(r+"×"+sec+" сек", r, {small:true, aux:true}));
-      return {phase:0, sets:a, rest:150,
-        tip:"Негативы. Подставь табурет, выйди в верхнюю точку, убери ноги и опускайся ровно "+sec+" секунд, считая вслух. Не падай в конце — контролируй до самого низа."};
+      var base=negSec(hang);
+      var n=pick(w,[4,5,5,3]), r=pick(w,[3,3,4,3]);
+      var sec=dl ? Math.max(3, base-1) : Math.min(8, base+(w===3?1:0));
+      if(w===3) a.push(P("ПРОБА", 0, {amrap:true, est:0, small:true, dur:10, ra:120}));
+      for(i=0;i<n;i++) a.push(P(r+"×"+sec+" сек", r, {small:true, aux:true, g:"neg", dur:r*(sec+3)}));
+      return {phase:0, sets:a, rest:120,
+        tip:(w===3 ? "<b>Сначала проба:</b> из полного виса попробуй одно чистое подтягивание. Не вышло — пиши 0 и иди дальше, вышло — программа переведёт тебя в следующую фазу. " : "")+"Негативы. Подставь табурет, выйди в верхнюю точку, убери ноги и опускайся ровно "+sec+" секунд, считая вслух. Не падай в конце — контролируй до самого низа. Длительность подобрана по твоему тесту виса."};
     }
     if(m==="B"){
-      var n2=pick(w,[5,5,6,4]), r2=pick(w,[6,8,10,6]);
-      for(i=0;i<n2;i++) a.push(P(String(r2), r2, {aux:true}));
-      return {phase:0, sets:a, rest:90,
-        tip:"Австралийские подтягивания: перекладина на уровне пояса, ноги на земле, тело прямое, тянешь грудь к перекладине. Чем ближе ноги к перекладине — тем легче."};
+      var n2=pick(w,[5,5,6,4]), r2=pick(w,[8,10,12,8]);
+      for(i=0;i<n2;i++) a.push(R(r2+" тяга", r2, SPR.band, {small:true, aux:true, g:"band"}));
+      return {phase:0, sets:a, rest:75, tip:BAND_TIP};
     }
-    var n3=pick(w,[3,3,4,3]), r3=pick(w,[8,9,10,6]);
-    for(i=0;i<n3;i++) a.push(P(r3+" лопат.", r3, {small:true, aux:true}));
-    for(i=0;i<3;i++)  a.push(P("вис 25 сек", 0, {small:true, aux:true}));
-    return {phase:0, sets:a, rest:75,
-      tip:"Лопаточные подтягивания: висишь на прямых руках и тянешь плечи вниз от ушей, руки не сгибаются. Это учит включать спину — без этого подтягивание не появится. Потом просто вис на хват."};
+    var n3=pick(w,[3,3,4,3]), r3=pick(w,[8,9,10,6]), hs=hangHold(hang, w, dl);
+    for(i=0;i<n3;i++) a.push(R(r3+" лопат.", r3, SPR.scap, {small:true, aux:true, g:"scap"}));
+    for(i=0;i<3;i++)  a.push(H("вис "+hs+" сек", hs, {aux:true, g:"hang"}));
+    return {phase:0, sets:a, rest:60,
+      tip:"Лопаточные подтягивания: висишь на прямых руках и тянешь плечи вниз от ушей, руки не сгибаются. Это учит включать спину — без этого подтягивание не появится. Потом вис на хват — время взято как 60% от твоего теста."};
   }
 
   if(ph===1){
     if(m==="A"){
-      var n4=pick(w,[4,5,6,3]);
-      for(i=0;i<n4;i++) a.push(P(String(M), M));
-      return {phase:1, sets:a, rest:180,
-        tip:"Много коротких подходов — так строится первое чистое подтягивание. Отдых 3 мин, каждый подход свежий. Ни одного грязного повторения с рывком."};
+      var n4=pick(w,[4,5,4,3]), r4=Math.max(1, M-1);
+      if(w===3) a.push(R("МАКС", M, SPR.pull, {amrap:true, est:M, small:true, ra:180}));
+      for(i=0;i<n4;i++) a.push(R(String(r4), r4, SPR.pull));
+      if(!dl) for(i=0;i<2;i++) a.push(P("нег. 5 сек", 1, {small:true, aux:true, g:"neg", dur:10}));
+      return {phase:1, sets:a, rest:150,
+        tip:(w===3 ? "<b>Первым подходом — максимум</b>, пока свежий: по нему программа обновит твой уровень. " : "")+
+            "Подходы на одно повторение меньше максимума: каждое чистое, без рывка. Отдых 2,5 мин. В конце два негатива — выйди в верхнюю точку с табурета и опускайся 5 секунд."};
     }
     if(m==="B"){
-      var n5=pick(w,[8,9,10,6]), r5=Math.max(1, M-1);
-      for(i=0;i<n5;i++) a.push(P(String(r5), r5));
-      return {phase:1, sets:a, rest:90,
-        tip:"Отдых 90 сек. Никогда не до отказа — как только чувствуешь, что следующее будет рывком, подход закончен."};
+      var n5=pick(w,[5,6,6,4]), r5=Math.max(1, Math.round(M*0.5));
+      for(i=0;i<n5;i++) a.push(R(String(r5), r5, SPR.pull));
+      return {phase:1, sets:a, rest:75,
+        tip:"Отдых 75 сек. Никогда не до отказа — как только чувствуешь, что следующее будет рывком, подход закончен."};
     }
-    for(i=0;i<4;i++) a.push(P("12 австр.", 12, {small:true, aux:true}));
-    for(i=0;i<3;i++) a.push(P("8 лопат.",   8, {small:true, aux:true}));
-    return {phase:1, sets:a, rest:75,
-      tip:"Австралийские + лопаточные. Лёгкий день, он держит объём спины без нагрузки на локти."};
+    for(i=0;i<4;i++) a.push(R("12 тяга", 12, SPR.band, {small:true, aux:true}));
+    for(i=0;i<3;i++) a.push(R("8 лопат.", 8, SPR.scap, {small:true, aux:true, g:"scap"}));
+    return {phase:1, sets:a, rest:60,
+      tip:"Лёгкий день: держит объём спины без нагрузки на локти. "+BAND_TIP};
   }
 
   var bump=dl?0:(w-1);
   if(m==="A"){
     [0.6,0.7,0.6,0.5].forEach(function(f){
-      var r=Math.max(1, Math.round(M*f*(dl?0.6:1))+bump); a.push(P(String(r), r));
+      var r=Math.max(1, Math.round(M*f*(dl?0.6:1))+bump); a.push(R(String(r), r, SPR.pull));
     });
-    if(!dl) a.push(P("МАКС", M+Math.max(0,w-2), {amrap:true, est:M+Math.max(0,w-2), small:true}));
-    return {phase:2, sets:a, rest:180,
+    if(!dl){ var e=M+Math.max(0,w-2); a[a.length-1].ra=180;
+             a.push(R("МАКС", e, SPR.pull, {amrap:true, est:e, small:true})); }
+    return {phase:2, sets:a, rest:120,
       tip: dl ? "Разгрузка."
-              : "Отдых 3 мин. В последнем подходе оставь одно повторение в запасе. "+
+              : "Отдых 2 мин, перед последним подходом — 3. Последний — на максимум чистых повторений: по нему программа обновит твой уровень. "+
                 (M>12 ? "Максимум выше 12 — добавь рюкзак 5 кг и работай по 5–8." : "")};
   }
   if(m==="B"){
-    var b6 = M<=8?8 : (M<=15?6:5);
-    var n6 = dl?5:(b6+(w-1)), r6 = Math.max(1, Math.round(M*(M>15?0.35:0.4)));
-    for(i=0;i<n6;i++) a.push(P(String(r6), r6));
-    return {phase:2, sets:a, rest:100,
-      tip:"Отдых 90–120 сек. Объём строит подтягивания лучше, чем работа до отказа."};
+    var n6 = dl?4:(w===1?5:6);
+    var r6 = Math.max(1, Math.round(M*(dl?0.4:0.5+0.025*(w-1))));
+    for(i=0;i<n6;i++) a.push(R(String(r6), r6, SPR.pull));
+    return {phase:2, sets:a, rest:75,
+      tip:"Отдых 75 сек. Объём строит подтягивания лучше, чем работа до отказа."};
   }
   var n7=dl?3:4, r7=Math.max(1, Math.round(M*0.4));
-  for(i=0;i<n7;i++) a.push(P(String(r7), r7));
-  a.push(P("12 австр.", 12, {small:true, aux:true}));
-  return {phase:2, sets:a, rest:90,
-    tip:"3 секунды вниз, пауза внизу на прямых руках. Медленное опускание — то, что делает хват и спину крепкими."};
+  for(i=0;i<n7;i++) a.push(R(String(r7), r7, SPR.pullSlow));
+  for(i=0;i<(dl?2:3);i++) a.push(R("12 тяга", 12, SPR.band, {small:true, aux:true, g:"band"}));
+  return {phase:2, sets:a, rest:75, keep:{band:2},
+    tip:"3 секунды вниз, пауза внизу на прямых руках. Медленное опускание — то, что делает хват и спину крепкими. Потом тяга резинки: отжиманий в программе много, и без горизонтальной тяги плечи со временем уходят вперёд. "+BAND_TIP};
 }
 
 /* ── ПРИСЕДАНИЯ ── в силовом дне в счёт идут только темповые приседания;
@@ -629,80 +678,313 @@ function squatPlan(x){
     var r  = dl ? Math.max(5, Math.min(12, Math.round(M*0.3)))
                 : Math.max(6, Math.min(15, Math.round(M*0.35)+(w-1)));
     var capped = (!dl && Math.round(M*0.35)+(w-1) > 15);
-    for(i=0;i<n;i++) a.push(P(r+" темп", r, {small:true}));
+    for(i=0;i<n;i++) a.push(R(r+" темп", r, SPR.squatTempo, {small:true}));
 
-    var nb = dl?2:3, rb = dl ? 10 : Math.min(25, 12 + 2*(w-1) + 2*step);
-    for(i=0;i<nb;i++) a.push(P(rb+" мост", rb, {small:true, aux:true}));
+    /* Мостик: первый цикл на двух ногах до 15, дальше на одной ноге.
+       Наращивать двуногий до 25 бессмысленно — нагрузка на ягодицу не растёт. */
+    var nb = dl?2:3, single = step>=1, rb;
+    if(single){
+      rb = dl ? 5 : Math.min(15, 6 + 2*(w-1) + (step-1));
+      for(i=0;i<nb;i++) a.push(R(rb+"/нога", rb, SPR.bridge*2, {small:true, aux:true, g:"bridge", ra:45}));
+    } else {
+      rb = dl ? 10 : Math.min(15, 12 + 2*(w-1));
+      for(i=0;i<nb;i++) a.push(R(rb+" мост", rb, SPR.bridge, {small:true, aux:true, g:"bridge", ra:45}));
+    }
 
     var sc = dl ? 25 : Math.min(60, 30 + 5*(w-1) + 5*step);
-    for(i=0;i<2;i++) a.push(P(sc+" сек", 0, {small:true, aux:true}));
+    for(i=0;i<2;i++) a.push(H(sc+" сек", sc, {aux:true, g:"wall", ra:45}));
 
     var extra = capped ? " Повторения дошли до потолка — дальше усложняй только весом: рюкзак 5–8 кг, потом 10–12. Глубину и количество не увеличивай."
               : step>=3 ? " Ты уже несколько циклов на этом — надень рюкзак 5–8 кг, но глубину не увеличивай."
-              : step>=1 ? " Мостик делай с ногами на возвышении 20 см — так ягодицы включаются сильнее."
               : "";
-    return {sets:a, rest:90,
-      tip:"Три упражнения подряд. <b>Темповые приседания</b> — 4 секунды вниз, 2 секунды пауза, вверх мощно; вес держи на всей стопе, колени разводи наружу по линии носков. <b>Ягодичный мостик</b> — лёжа на спине, поднимаешь таз, колени не нагружаются вообще; слабые колени почти всегда идут в паре со слабыми ягодицами, поэтому это здесь не для галочки. <b>Стульчик у стены</b> — спина к стене, бёдра параллельно полу, держишь время; статика укрепляет сухожилия колена без движения в суставе."+extra};
+    var bridgeTip = single
+      ? "<b>Мостик на одной ноге</b> — лёжа на спине, одна нога согнута и стоит на полу, вторая вытянута; поднимаешь таз, не давая ему перекоситься. Число — на каждую ногу. Если таз заваливается или тянет поясницу — вернись на две ноги и делай 15. Слабые колени почти всегда идут в паре со слабыми ягодицами, поэтому это здесь не для галочки."
+      : "<b>Ягодичный мостик</b> — лёжа на спине, поднимаешь таз, колени не нагружаются вообще; слабые колени почти всегда идут в паре со слабыми ягодицами, поэтому это здесь не для галочки.";
+    return {sets:a, rest:75,
+      tip:"Три упражнения подряд. <b>Темповые приседания</b> — 4 секунды вниз, 2 секунды пауза, вверх мощно; вес держи на всей стопе, колени разводи наружу по линии носков. "+bridgeTip+" <b>Стульчик у стены</b> — спина к стене, бёдра параллельно полу, держишь время; статика укрепляет сухожилия колена без движения в суставе."+extra};
   }
   if(m==="B"){
-    var n2 = dl ? (M>40?3:4) : (M>40?5:7);
+    var n2 = dl ? 3 : (M>40?4:5);
     var r2 = dl ? Math.max(5, Math.round(M*0.45))
-                : Math.max(5, Math.round(M*(0.50+0.07*(w-1))));
-    for(i=0;i<n2;i++) a.push(P(String(r2), r2));
-    if(!dl) a.push(P("МАКС", M+(w-1)*2, {amrap:true, est:M+(w-1)*2, small:true}));
-    return {sets:a, rest:75,
-      tip:"Отдых 60–90 сек. Последний подход — на максимум, именно он двигает цифру к сотне. Дыши: вдох вниз, выдох вверх, не задерживай. <b>Про колени:</b> жжение в мышцах — норма, тянущая или острая боль в самом колене — нет. Если колени отзываются, приседай до чуть выше параллели и держи эту глубину пару циклов, объём при этом не снижай."};
+                : Math.max(5, Math.round(M*(0.55+0.05*(w-1))));
+    for(i=0;i<n2;i++) a.push(R(String(r2), r2, SPR.squat));
+    if(!dl){ var e=M+(w-1)*2; a[a.length-1].ra=120;
+             a.push(R("МАКС", e, SPR.squat, {amrap:true, est:e, small:true})); }
+    return {sets:a, rest:60,
+      tip:"Отдых 60 сек, перед последним — 2 мин. Последний подход — на максимум, именно он двигает цифру к сотне. Дыши: вдох вниз, выдох вверх, не задерживай. <b>Про колени:</b> жжение в мышцах — норма, тянущая или острая боль в самом колене — нет. Если колени отзываются, приседай до чуть выше параллели и держи эту глубину пару циклов, объём при этом не снижай."};
   }
   var n3=dl?3:4, r3=Math.max(4, Math.round(M*0.45));
-  for(i=0;i<n3;i++) a.push(P(String(r3), r3));
-  return {sets:a, rest:90,
+  for(i=0;i<n3;i++) a.push(R(String(r3), r3, SPR.squatSlow));
+  return {sets:a, rest:75,
     tip:"Темп: 3 сек вниз, пауза 2 сек внизу, вверх мощно. Пятки не отрываются, колени разводи наружу — сведённые внутрь колени и есть главная причина, по которой они болят. Если пятки отрываются, подложи под них книгу: это не костыль, а способ приседать глубже без перегрузки колена, пока голеностоп не станет подвижнее."};
 }
 
 var PLANNERS = {pull:pullPlan, push:pushPlan, squat:squatPlan};
 
+/* Разминка. В счёт не идёт и не отмечается — это список, а не блок. */
+var WARMUP = [
+  "<b>Кисти</b> — в упоре на коленях перекатывайся на ладонях вперёд-назад и по кругу, 30 сек",
+  "<b>Плечи</b> — круги прямыми руками, по 10 вперёд и назад",
+  "<b>Лопаточные отжимания</b> — упор лёжа, руки прямые, сводишь и разводишь лопатки, 10 раз",
+  "<b>Вис</b> 15–20 сек и 5 лопаточных подтягиваний",
+  "<b>Ягодичный мостик</b> — 10 раз, включает ягодицы перед приседаниями",
+  "<b>Приседания</b> — 10 в половину амплитуды, потом 5 медленных в полную"
+];
+function warmupHtml(shortMode){
+  var list = shortMode ? [WARMUP[0], WARMUP[3], WARMUP[5]] : WARMUP;
+  return '<details class="wu"><summary>Разминка · '+(shortMode?'3 минуты':'4–5 минут')+'</summary><ol><li>'+
+         list.join('</li><li>')+'</li></ol></details>';
+}
+
 /* ── ДОПОЛНИТЕЛЬНЫЙ БЛОК ──
    Суббота — корпус. Среда — задняя поверхность бедра и боковая устойчивость.
    Понедельник не трогаем: самый загруженный будний день.
-   Этот блок не относится ни к одному из трёх упражнений и в их счётчики
-   не входит вообще — у него ключ "extra", которого нет в описателях EX. */
-function extraPlan(w,k,c){
+   Время удержаний считается от теста планки: полая позиция тяжелее планки,
+   поэтому старт с ~40% от неё, боковая — с ~35% (на каждую сторону).
+   Блок не входит ни в один счётчик — у него ключ "extra", которого нет в EX. */
+function hollowSec(plank, w, dl, step){
+  if(plank==null) return dl ? 15 : Math.min(60, 20+5*(w-1)+5*(step||0));
+  return dl ? clamp(Math.round(plank*0.3), 10, 40)
+            : clamp(Math.round(plank*0.4)+5*(w-1), 15, 60);
+}
+function sidePlankSec(plank, w, dl, step){
+  if(plank==null) return dl ? 15 : Math.min(45, 20+5*(w-1)+5*(step||0));
+  return dl ? clamp(Math.round(plank*0.25), 10, 30)
+            : clamp(Math.round(plank*0.35)+5*(w-1), 15, 45);
+}
+function extraPlan(w,k,c,T){
   var dl=(w===CFG.cycleWeeks), step=Math.min(c||0,4), a=[], i;
+  var plank = (T && T.plank!=null) ? T.plank : null;
 
   if(k==="A"){
-    var n=dl?2:3, sec=dl?15:Math.min(60, 20+5*(w-1)+5*step);
-    for(i=0;i<n;i++) a.push(P(sec+" сек", 0, {small:true, aux:true}));
+    var n=dl?2:3, sec=hollowSec(plank, w, dl, step);
+    for(i=0;i<n;i++) a.push(H(sec+" сек", sec, {aux:true, g:"hollow"}));
     return {ex:"extra", nm:"Корпус", modeName:"Полая позиция"+(dl?" · разгрузка":""),
-      sets:a, rest:75, M:"—",
+      sets:a, rest:45, M:"—",
       tip:"Лёжа на спине: поясница прижата к полу, лопатки и ноги оторваны от пола, руки вдоль тела. Если поясница отрывается — согни колени, так легче. Это не пресс ради пресса: без жёсткого корпуса таз провисает в отжиманиях и раскачивается на турнике."};
   }
 
   var nh=dl?2:3, rh=dl?5:(6+2*(w-1)+step);
-  for(i=0;i<nh;i++) a.push(P(rh+" сгиб", rh, {small:true, aux:true}));
-  var sp=dl?15:Math.min(45, 20+5*(w-1)+5*step);
-  for(i=0;i<2;i++) a.push(P(sp+" сек", 0, {small:true, aux:true}));
+  for(i=0;i<nh;i++) a.push(R(rh+" сгиб", rh, SPR.curl, {small:true, aux:true, g:"curl"}));
+  var sp=sidePlankSec(plank, w, dl, step);
+  for(i=0;i<2;i++) a.push(H(sp+" сек", sp*2+10, {aux:true, g:"side"}));
 
   return {ex:"extra", nm:"Задняя поверхность и бок", modeName:"Бицепс бедра"+(dl?" · разгрузка":""),
-    sets:a, rest:75, M:"—",
-    tip:"<b>Сгибание ног со скольжением</b> — лёжа на спине, пятки на полотенце на гладком полу, поднимаешь таз и медленно выпрямляешь ноги, потом подтягиваешь пятки обратно, таз при этом не опускаешь. Это то, чего в программе не хватало: колено держится балансом квадрицепса и бицепса бедра, а тренировался у нас только первый. <b>Боковая планка</b> — на предплечье, тело в линию, время указано на каждую сторону; она укрепляет среднюю ягодичную, из-за слабости которой колено и заваливается внутрь."};
+    sets:a, rest:45, M:"—",
+    tip:"<b>Сгибание ног со скольжением</b> — лёжа на спине, пятки на полотенце на гладком полу, поднимаешь таз и медленно выпрямляешь ноги, потом подтягиваешь пятки обратно, таз при этом не опускаешь. Колено держится балансом квадрицепса и бицепса бедра, а приседания тренируют только первый. <b>Боковая планка</b> — на предплечье, тело в линию, время указано на каждую сторону; она укрепляет среднюю ягодичную, из-за слабости которой колено и заваливается внутрь."};
+}
+
+/* ── ЛИМИТ ВРЕМЕНИ ── */
+
+/* Подходы из старых замороженных тренировок не знают своей длительности —
+   прикидываем по тексту. */
+function setSecs(ex, x){
+  if(x.dur) return x.dur;
+  var m=/(\d+)\s*сек/.exec(x.t||"");
+  if(m) return +m[1];
+  return Math.round((x.v||x.est||0)*3);
+}
+function blockSecs(b){
+  if(b.locked || !b.sets || !b.sets.length) return 0;
+  var t=0; b.sets.forEach(function(x){ t+=setSecs(b.ex, x); });
+  for(var i=0;i<b.sets.length-1;i++) t += (b.sets[i].ra || b.rest || 0);
+  return t;
+}
+function sessionSecs(blocks, warmup){
+  var live=(blocks||[]).filter(function(b){ return !b.locked && b.sets && b.sets.length; });
+  if(!live.length) return 0;
+  var t=(warmup==null ? CFG.session.warmup : warmup) + CFG.session.switchSec*(live.length-1);
+  live.forEach(function(b){ t+=blockSecs(b); });
+  return t;
+}
+function mins(sec){ return Math.round(sec/60); }
+
+/* Минимум подходов основной группы блока, ниже которого не урезаем,
+   и нижняя граница отдыха. X — дополнительный блок. */
+var TRIM_MIN   = {A:3, B:5, C:3, X:2};
+var REST_FLOOR = {A:90, B:45, C:60, X:30};
+var TRIM_ORDER = ["X","B","C","A"];
+function tierOf(b){ return (b.ex==="extra"||b.ex==="measure") ? "X" : (b.mode||"B"); }
+function mainGroup(b){
+  for(var i=0;i<b.sets.length;i++) if(!b.sets[i].amrap) return b.sets[i].g||"main";
+  return "main";
+}
+
+function fitBudget(blocks){
+  var budget=CFG.session.budget, live=blocks.filter(function(b){ return !b.locked && b.sets && b.sets.length; });
+  live.forEach(function(b){
+    var cnt={}, main=mainGroup(b), keep=b.keep||{};
+    b.sets.forEach(function(x){ if(!x.amrap){ var g=x.g||"main"; cnt[g]=(cnt[g]||0)+1; } });
+    b._min={}; b.cut=0; b.restFull=b.rest;
+    for(var g in cnt) b._min[g] = Math.min(cnt[g], keep[g]!=null ? keep[g] : (g===main ? TRIM_MIN[tierOf(b)] : 1));
+  });
+  function spareGroup(b){
+    var cnt={}, best=null;
+    b.sets.forEach(function(x){ if(!x.amrap){ var g=x.g||"main"; cnt[g]=(cnt[g]||0)+1; } });
+    for(var g in cnt){
+      var sp=cnt[g]-b._min[g];
+      if(sp>0 && (!best || sp>best.sp)) best={g:g, sp:sp};
+    }
+    return best;
+  }
+  function pickBlock(test){
+    for(var t=0;t<TRIM_ORDER.length;t++){
+      var tier=TRIM_ORDER[t], cand=null;
+      live.forEach(function(b){
+        if(tierOf(b)!==tier || !test(b)) return;
+        if(!cand || blockSecs(b)>blockSecs(cand)) cand=b;
+      });
+      if(cand) return cand;
+    }
+    return null;
+  }
+  var guard=0;
+  while(sessionSecs(blocks)>budget && guard++<300){
+    var b=pickBlock(function(b){ return !!spareGroup(b); });
+    if(!b) break;
+    var g=spareGroup(b).g;
+    for(var i=b.sets.length-1;i>=0;i--){
+      if(!b.sets[i].amrap && (b.sets[i].g||"main")===g){ b.sets.splice(i,1); b.cut++; break; }
+    }
+  }
+  guard=0;
+  while(sessionSecs(blocks)>budget && guard++<300){
+    var rb=pickBlock(function(b){ return b.rest>REST_FLOOR[tierOf(b)]; });
+    if(!rb) break;
+    rb.rest=Math.max(REST_FLOOR[tierOf(rb)], rb.rest-15);
+  }
+  live.forEach(function(b){ delete b._min; delete b.keep; });
+  var secs=sessionSecs(blocks);
+  return {secs:secs, over:secs>budget,
+          cut:live.reduce(function(n,b){ return n+b.cut; },0),
+          restCut:live.some(function(b){ return b.rest<b.restFull; })};
+}
+
+/* ── ЗАМЕРЫ ── в последнюю тренировку разгрузочной недели. Отдельного дня
+   теста после первого цикла нет: максимумы трёх упражнений берутся из
+   подходов «МАКС» за цикл, а планка и вис — отсюда.                      */
+function measurePlan(T){
+  var a=[P("планка", 0, {amrap:true, aux:true, small:true, g:"plank", m:"plank", dur:(T.plank||60), est:(T.plank!=null?T.plank:0)}),
+         P("вис",    0, {amrap:true, aux:true, small:true, g:"hang",  m:"hang",  dur:(T.hang||30),  est:(T.hang!=null?T.hang:0)})];
+  return {ex:"measure", nm:"Замеры", modeName:"раз в цикл", sets:a, rest:120, M:"—",
+    tip:"Делай первыми, пока свежий. <b>Планка</b> — на предплечьях до первого провала таза. <b>Вис</b> — на прямых руках до разжатия хвата. Нажми на кнопку и введи секунды: по ним программа пересчитает корпус и вис на следующий цикл."};
+}
+
+/* ── КОРОТКАЯ ВЕРСИЯ ── для дней, когда сил нет: по 2–3 подхода основной
+   работы на упражнение, без максимумов и допблока, около 15 минут.
+   Пропуск вредит больше, чем сокращённая тренировка.                     */
+var SHORT = {budget:15*60, warmup:180, rest:75};
+function shortFit(blocks){
+  for(var i=blocks.length-1;i>=0;i--) if(blocks[i].ex==="extra") blocks.splice(i,1);
+  var live=blocks.filter(function(b){ return !b.locked && b.sets && b.sets.length && b.ex!=="measure"; });
+  live.forEach(function(b){
+    var g=mainGroup(b);
+    b.sets=b.sets.filter(function(x){ return !x.amrap && (x.g||"main")===g; }).slice(0,3);
+    b.sets.forEach(function(x){ delete x.ra; });
+    b.rest=Math.min(b.rest, SHORT.rest); delete b.keep;
+  });
+  var guard=0;
+  while(sessionSecs(blocks, SHORT.warmup)>SHORT.budget && guard++<20){
+    var cand=null;
+    live.forEach(function(b){ if(b.sets.length>2 && (!cand || blockSecs(b)>blockSecs(cand))) cand=b; });
+    if(!cand) break;
+    cand.sets.pop();
+  }
+  return sessionSecs(blocks, SHORT.warmup);
+}
+
+/* ── СМЕНА ЦИКЛА ──
+   Тест сдаётся один раз, в самом начале. Дальше уровень следующего цикла
+   собирается сам: лучший подход «МАКС» за цикл становится новым максимумом
+   (вниз максимум автоматически не идёт), планка и вис — из блока замеров.
+   Циклы, у которых уже есть ручной тест из прежних версий, остаются как были. */
+function cycleSet(c){
+  var o=S.cycles[c]; if(!o) return false;
+  return EX.some(function(e){ return o[e.key]!=null; });
+}
+function isTestCycle(c){ return c===0 || (cycleSet(c) && !S.cycles[c].auto); }
+function amrapBest(exKey, c){
+  var best=null;
+  for(var id in S.log){
+    if(c!=null && +id.split("-")[0]!==c) continue;
+    var L=S.log[id]; if(!L.plan || !L.marks) continue;
+    L.plan.forEach(function(b){
+      if(b.ex!==exKey || b.locked) return;
+      (b.sets||[]).forEach(function(x,i){
+        var v=L.marks[markKey(b.ex,i)];
+        if(x.amrap && !x.aux && v!=null && (best===null || v>best)) best=v;
+      });
+    });
+  }
+  return best;
+}
+function measured(c, what){
+  var best=null;
+  for(var id in S.log){
+    if(+id.split("-")[0]!==c) continue;
+    var L=S.log[id]; if(!L.plan || !L.marks) continue;
+    L.plan.forEach(function(b){
+      if(b.ex!=="measure") return;
+      (b.sets||[]).forEach(function(x,i){
+        var v=L.marks[markKey(b.ex,i)];
+        if(x.m===what && v!=null && v>0) best=v;
+      });
+    });
+  }
+  return best;
+}
+function deriveCycle(c){
+  var prev=S.cycles[c-1], o={auto:true, date:today()};
+  EX.forEach(function(e){
+    if(prev[e.key]==null){ o[e.key]=null; return; }
+    var b=amrapBest(e.key, c-1);
+    o[e.key]=Math.max(prev[e.key], b==null?0:b);
+  });
+  ["plank","hang"].forEach(function(k){
+    var m=measured(c-1, k);
+    if(m!=null) o[k]=m; else if(prev[k]!=null) o[k]=prev[k];
+  });
+  return o;
+}
+function rollCycles(){
+  var n=horizonCycles(), t=today(), changed=false;
+  var lastK=DAYS[DAYS.length-1].k;
+  for(var c=1;c<n;c++){
+    if(cycleSet(c)) continue;
+    if(!cycleSet(c-1)) break;
+    var L=S.log[sid(c-1, CFG.cycleWeeks, lastK)];
+    if(!(sdate(c,1,"A")<=t || (L && L.done))) break;
+    S.cycles[c]=deriveCycle(c); changed=true;
+  }
+  if(changed) save();
+  return changed;
 }
 
 /* Живая сборка тренировки по текущему коду. */
 function buildSession(c,w,k){
   var day = dayByKey(k);
   var out = {id:sid(c,w,k), c:c, w:w, k:k, date:sdate(c,w,k), dayName:day.nm, blocks:[]};
-  if(w===1 && k==="A"){ out.test=true; return out; }
-  var dl = (w===CFG.cycleWeeks);
+  if(w===1 && k==="A" && isTestCycle(c)){ out.test=true; return out; }
+  var dl = (w===CFG.cycleWeeks), T = S.cycles[c] || {};
+  var short = !!(S.log[out.id] && S.log[out.id].short);
   EX.forEach(function(e){
     var M = mOf(c, e.key);
     if(M===null){ out.blocks.push({ex:e.key, nm:e.name, locked:true}); return; }
     var mode = day.map[e.key];
-    var p = PLANNERS[e.key]({mode:mode, w:w, M:M, c:c, dl:dl});
+    var p = PLANNERS[e.key]({mode:mode, w:w, M:M, c:c, dl:dl, T:T});
     p.ex=e.key; p.nm=e.name; p.M=M; p.mode=mode;
     p.modeName = MODE[mode] + (dl?" · разгрузка":"");
     out.blocks.push(p);
   });
-  if((k==="A"||k==="C") && mOf(c,"squat")!==null) out.blocks.push(extraPlan(w,k,c));
+  if((k==="A"||k==="C") && mOf(c,"squat")!==null) out.blocks.push(extraPlan(w,k,c,T));
+  if(dl && k===DAYS[DAYS.length-1].k && cycleSet(c)) out.blocks.unshift(measurePlan(T));
+  if(short){
+    out.short = true; out.fit = null;
+    out.secs = shortFit(out.blocks);
+  } else {
+    out.fit = fitBudget(out.blocks);
+    out.secs = out.fit.secs;
+  }
   return out;
 }
 
@@ -715,7 +997,8 @@ function freezeBlocks(live){
             phase:b.phase, rest:b.rest,
             sets:(b.sets||[]).map(function(x){
               return {t:x.t, v:x.v, aux:!!x.aux, amrap:!!x.amrap,
-                      est:(x.est==null?null:x.est), small:!!x.small};
+                      est:(x.est==null?null:x.est), small:!!x.small,
+                      g:x.g||"main", dur:x.dur||0, ra:x.ra||0, m:x.m||null};
             })};
   });
 }
@@ -739,8 +1022,28 @@ function getSession(c,w,k){
               M:fb.M, phase:fb.phase, rest:fb.rest, sets:fb.sets||[],
               tip: live.tip || "Эта тренировка записана раньше — раскладка сохранена такой, какой ты её делал."};
     });
+    s.short = !!L.short;
+    s.secs = sessionSecs(s.blocks, s.short ? SHORT.warmup : null);
+    s.fit = null;
   }
   return s;
+}
+
+/* Что программа поставила по результатам теста — короткая сводка. */
+function levelLines(c){
+  var T=S.cycles[c]||{}, out=[];
+  if(T.pull!=null){
+    var ph=pullPhase(T.pull), hang=(T.hang!=null?T.hang:CFG.testDefaults.hang);
+    out.push("<b>Подтягивания</b> — "+(ph===0
+      ? "фаза 0: негативы по "+negSec(hang)+" сек, вис от "+hangHold(hang,1,false)+" сек, тяга резинки"
+      : ph===1 ? "фаза 1: подходы по "+Math.max(1,T.pull-1)+" и негативы, строим пятёрку"
+               : "фаза 2: подходы от "+Math.round(T.pull*0.6)+", объём по "+Math.round(T.pull*0.5)));
+  }
+  if(T.push!=null) out.push("<b>Отжимания</b> — сила от "+Math.max(1,Math.round(T.push*0.6))+", объём по "+Math.max(1,Math.round(T.push*0.55)));
+  if(T.squat!=null) out.push("<b>Приседания</b> — темповые по "+Math.max(6,Math.min(15,Math.round(T.squat*0.35)))+", объём от "+Math.max(5,Math.round(T.squat*0.55)));
+  var pl=(T.plank!=null?T.plank:null);
+  if(pl!=null) out.push("<b>Корпус</b> — полая позиция от "+hollowSec(pl,1,false)+" сек, боковая планка от "+sidePlankSec(pl,1,false)+" сек");
+  return out;
 }
 
 
@@ -1133,9 +1436,9 @@ function exReps(){
   return out;
 }
 
-/* Максимум, когда-либо показанный в тесте. */
+/* Максимум, когда-либо показанный в тесте или в подходе «МАКС». */
 function bestRecord(exKey){
-  var best=0;
+  var best=amrapBest(exKey, null) || 0;
   for(var i=0;i<S.cycles.length;i++){
     var c=S.cycles[i];
     if(c && c[exKey]!=null && c[exKey]>best) best=c[exKey];
@@ -1224,7 +1527,7 @@ function awardInfo(id){
   if(kind==="rec" && e.key==="pull" && n===1){
     return {kind:"rec", ex:e, n:n, eyebrow:"Знак отличия",
       title:"Первое чистое подтягивание",
-      line:"Единственная цифра в этой программе, которая начинается с нуля и долго на нём стоит. Всё, что было до этого дня — негативы, австралийские, вис — существовало ради одного этого повторения. Дальше счётчик наконец пойдёт."};
+      line:"Единственная цифра в этой программе, которая начинается с нуля и долго на нём стоит. Всё, что было до этого дня — негативы, тяга резинки, вис — существовало ради одного этого повторения. Дальше счётчик наконец пойдёт."};
   }
   if(kind==="rec"){
     return {kind:"rec", ex:e, n:n, eyebrow:"Новый рекорд",
@@ -1408,12 +1711,12 @@ function toggle(ex, idx){
   } else {
     var st = blk.sets[idx], v = st.v;
     if(st.amrap){
-      var ans = prompt("Последний подход на максимум. Сколько получилось?", st.est);
+      var ans = prompt(st.m ? "Сколько секунд продержал?" : "Подход на максимум. Сколько получилось?", st.est || "");
       if(ans===null) return;
       v = Math.max(0, parseInt(ans,10) || 0);
     }
     L.marks[key] = v;
-    startRest(blk.rest);
+    startRest(st.ra || blk.rest);
     try{ navigator.vibrate && navigator.vibrate(35); }catch(e){}
   }
   save(); redrawToday();
@@ -1424,9 +1727,16 @@ function finish(){
   if(L.done){ S.view=null; save(); render(); return; }
   L.done=true; L.date=today();
   S.view=null; stopRest(); save();
+  rollCycles();
   checkAwards(true);
   save(); render();
   sndDone();
+}
+function setShort(on){
+  var r=currentRef(), L=logOf(r.id);
+  if(L.plan || L.done) return;           /* начатую тренировку не перекраиваем */
+  if(on) L.short=true; else delete L.short;
+  save(); render();
 }
 function nextAward(){
   if(S.pending && S.pending.length) S.pending.shift();
@@ -1445,7 +1755,14 @@ function saveTest(){
     if(isNaN(v) || v<0){ ok=false; return; }
     o[e.key]=v;
   });
-  if(!ok){ alert("Заполни все три поля. Ноль — это тоже нормальный результат."); return; }
+  if(!ok){ alert("Заполни все три упражнения. Ноль — это тоже нормальный результат."); return; }
+  var pl=parseInt(document.getElementById("ti_plank").value, 10);
+  if(isNaN(pl) || pl<0){ alert("Заполни планку — по ней строится корпус."); return; }
+  o.plank=pl;
+  var hg=parseInt(document.getElementById("ti_hang").value, 10);
+  if(o.pull===0 && (isNaN(hg) || hg<0)){
+    alert("Подтягиваний ноль — тогда нужен вис: по нему подбираются негативы и время виса."); return; }
+  if(!isNaN(hg) && hg>=0) o.hang=hg;
   o.date=today();
   S.cycles[r.c]=o;
   var L=logOf(r.id); L.done=true; L.date=today();
@@ -1518,6 +1835,7 @@ function hardReset(){
 function moodColor(v){ for(var i=0;i<MOODS.length;i++) if(MOODS[i].v===v) return MOODS[i].c; return null; }
 
 function render(){
+  rollCycles();
   var c=curCycle(), r=currentRef();
   var mh="";
   EX.forEach(function(e){
@@ -1597,32 +1915,69 @@ function renderToday(){
   if(s.test){
     h+='<h2>Тест максимумов</h2>';
     h+='<div class="meta">разомнись 5–7 минут, отдых между тестами 3 мин</div>';
+    h+=warmupHtml(false);
     h+='<div class="note">По одному подходу до технического отказа в каждом упражнении. Как только техника поплыла — стоп. Ноль в подтягиваниях — нормальный честный результат, программа его учтёт.</div>';
-    EX.forEach(function(e){
-      var v=mOf(s.c, e.key); v = (v==null?"":v);
-      h+='<div class="tin"><label>'+e.name+'</label>'+
-         '<input type="number" inputmode="numeric" id="ti_'+e.key+'" value="'+v+'" placeholder="0"></div>';
-    });
-    h+='<button class="btn" onclick="saveTest()">Записать максимумы</button>';
+    var T0=S.cycles[s.c]||{};
+    function tinp(id, label, val, ph){
+      return '<div class="tin"><label>'+label+'</label>'+
+             '<input type="number" inputmode="numeric" id="ti_'+id+'" value="'+(val==null?"":val)+'" placeholder="'+ph+'"></div>';
+    }
+    EX.forEach(function(e){ h+=tinp(e.key, e.name, mOf(s.c, e.key), "0"); });
+    h+=tinp("plank", "Планка, сек", T0.plank, "сек");
+    h+=tinp("hang",  "Вис на турнике, сек", T0.hang, "сек");
+    h+='<div class="note"><b>Планка</b> — на предплечьях, тело в одну линию, держишь, пока таз не начал проваливаться или задираться. По ней строится корпус. <b>Вис</b> — на прямых руках, до разжатия хвата; обязателен, только если подтягиваний ноль — по нему подбираются негативы. Каждая тренировка собирается из этих цифр и укладывается в '+mins(CFG.session.budget)+' минут. Этот тест — единственный: дальше программа обновляет уровень сама, по подходам на максимум.</div>';
+    h+='<button class="btn" onclick="saveTest()">Записать результаты</button>';
     if(L.done) h+='<button class="btn ghost sm" onclick="resetSess()">Сбросить</button>';
     h+='</div>';
+    if(L.done){
+      var lv=levelLines(s.c);
+      if(lv.length) h+='<div class="card"><div class="eyebrow">Что поставила программа</div><div class="note">'+lv.join("<br>")+'</div></div>';
+    }
     document.getElementById("v0").innerHTML=h; drawRest(); return;
   }
 
-  h+='<h2>'+s.dayName+'</h2><div class="meta">упражнения по порядку сверху вниз</div></div>';
+  var started = !!(L.plan || L.done);
+  h+='<h2>'+s.dayName+(s.short?' · короткая':'')+'</h2><div class="meta">упражнения по порядку сверху вниз'+
+     (s.secs ? ' · ≈ '+mins(s.secs)+' мин' : '')+'</div>';
+  if(s.short)
+    h+='<div class="note">Короткая версия: по 2–3 подхода основной работы, без максимумов и допблока. Лучше так, чем пропуск.</div>';
+  else if(s.fit && s.fit.over)
+    h+='<div class="warn">Даже после урезки выходит больше '+mins(CFG.session.budget)+' минут. На таком уровне пора усложнять движения (рюкзак, ноги на возвышении) вместо того, чтобы добавлять повторения.</div>';
+  else if(s.fit && (s.fit.cut || s.fit.restCut))
+    h+='<div class="note">Объём подогнан под '+mins(CFG.session.budget)+' минут'+
+       (s.fit.cut ? ': снято подходов — '+s.fit.cut+', в первую очередь из дней объёма и допблока' : '')+
+       (s.fit.restCut ? (s.fit.cut?', ':': ')+'отдых местами укорочен' : '')+'.</div>';
+  if(s.secs) h+=warmupHtml(s.short);
+  if(s.secs && !started)
+    h+='<button class="btn ghost sm" onclick="setShort('+(s.short?0:1)+')">'+
+       (s.short ? 'Вернуть полную тренировку' : 'Нет сил — короткая версия на '+mins(SHORT.budget)+' минут')+'</button>';
+  h+='</div>';
+
+  /* первая тренировка цикла, собранного автоматически: показать, что изменилось */
+  var CY=S.cycles[s.c];
+  if(s.w===1 && s.k==="A" && CY && CY.auto && s.c>0 && S.cycles[s.c-1]){
+    var PV=S.cycles[s.c-1], ch=[];
+    EX.forEach(function(e){
+      if(CY[e.key]==null) return;
+      ch.push(e.name+': '+(PV[e.key]!=null && PV[e.key]!==CY[e.key] ? PV[e.key]+' → <b>'+CY[e.key]+'</b>' : CY[e.key]+' (без изменений)'));
+    });
+    h+='<div class="card"><div class="eyebrow">Новый цикл</div><div class="note">Уровень обновлён по лучшим подходам на максимум прошлого цикла.<br>'+
+       ch.join('<br>')+'</div><div class="note">'+levelLines(s.c).join('<br>')+'</div></div>';
+  }
 
   var totDone=0, totAll=0, reps=0;
   s.blocks.forEach(function(b){
     h+='<div class="card">';
     if(b.locked){
-      h+='<div class="exhead"><h3 class="ex">'+b.nm+'<em>ждёт теста</em></h3></div>';
-      h+='<div class="note">Сдай тест максимума в субботу первой недели цикла.</div></div>';
+      h+='<div class="exhead"><h3 class="ex">'+b.nm+'<em>'+(s.c===0?'ждёт теста':'ждёт итогов цикла')+'</em></h3></div>';
+      h+='<div class="note">'+(s.c===0 ? 'Сдай стартовый тест — он в первой субботе.'
+            : 'Откроется, когда закроешь последнюю тренировку текущего цикла или когда наступит дата начала нового.')+'</div></div>';
       return;
     }
     var done=0;
     b.sets.forEach(function(x,i){
       var v=marks[markKey(b.ex,i)];
-      if(v!=null){ done++; reps+=v; }
+      if(v!=null){ done++; if(b.ex!=="measure") reps+=v; }
     });
     totDone+=done; totAll+=b.sets.length;
     h+='<div class="exhead"><h3 class="ex">'+b.nm+'<em>'+b.modeName+'</em></h3>';
@@ -1636,7 +1991,7 @@ function renderToday(){
       h+='<button class="set'+(d?' done':'')+(nx?' active':'')+'" onclick="toggle(\''+b.ex+'\','+i+')">'+
          '<span class="lamp"></span><div class="n">'+(i+1)+'</div>'+
          '<div class="r'+(x.small&&!d?' sm':'')+'">'+(d?v:x.t)+'</div>'+
-         '<div class="'+(x.amrap?'tag':'u')+'">'+(d?"сделано":(x.amrap?"≈"+x.est:""))+'</div></button>';
+         '<div class="'+(x.amrap?'tag':'u')+'">'+(d?(x.m?"сек":"сделано"):(x.amrap?(x.m?"сек":(x.est?"≈"+x.est:"макс")):""))+'</div></button>';
     });
     h+='</div><div class="note">'+b.tip+'</div></div>';
   });
@@ -1682,21 +2037,23 @@ function firstOpen(b, marks){
 function renderPlan(){
   var c=curCycle(), t=today(), h="";
   h+='<div class="card"><div class="eyebrow">Цикл '+(c+1)+'</div><h2>Четыре недели</h2>';
-  h+='<div class="meta">сб · пн · ср — всегда все три упражнения</div>';
+  h+='<div class="meta">сб · пн · ср — все три упражнения, до '+mins(CFG.session.budget)+' минут</div>';
   h+='<div class="note">Порядок внутри тренировки не меняй: подтягивания первыми, пока свежий, приседания последними. Тяжёлые дни разнесены — в один день не сходится силовая работа на все три.</div></div>';
 
   for(var w=1;w<=CFG.cycleWeeks;w++){
     h+='<div class="wk"><h3><span>Неделя '+w+'</span>'+
-       (w===CFG.cycleWeeks ? '<em>разгрузка</em>' : (w===1?'<em>тест</em>':''))+'</h3>';
+       (w===CFG.cycleWeeks ? '<em>разгрузка · замеры</em>' : (w===1&&isTestCycle(c)?'<em>тест</em>':''))+'</h3>';
     DAYS.forEach(function(d){
       var s=getSession(c,w,d.k), L=S.log[s.id];
       h+='<div class="sess'+(L&&L.done?' ok':'')+(s.date===t?' now':'')+'" onclick="openS(\''+s.id+'\')">';
-      h+='<div class="top"><span class="d">'+fmt(s.date)+'</span><span class="nm">'+d.nm+'</span></div>';
-      if(s.test){ h+='<div class="lines">тест всех трёх максимумов</div>'; }
+      h+='<div class="top"><span class="d">'+fmt(s.date)+'</span><span class="nm">'+d.nm+'</span>'+
+         (s.secs ? '<span class="meta">≈'+mins(s.secs)+' мин</span>' : '')+'</div>';
+      if(s.test){ h+='<div class="lines">тест трёх максимумов, планки и виса</div>'; }
       else{
         h+='<div class="lines">';
         s.blocks.forEach(function(b){
-          if(b.locked){ h+=b.nm.toLowerCase()+" — ждёт теста<br>"; return; }
+          if(b.locked){ h+=b.nm.toLowerCase()+" — "+(c===0?"ждёт теста":"ждёт итогов цикла")+"<br>"; return; }
+          if(b.ex==="measure"){ h+="замеры: планка и вис<br>"; return; }
           var runs=[];
           b.sets.forEach(function(x){
             var key = x.amrap ? "макс" : x.t;
@@ -2094,6 +2451,70 @@ function selfTest(){
     S.start = addD(today(), -700);
     ok(horizonCycles() >= 25+CFG.aheadCycles-1, "горизонт не растёт: "+horizonCycles());
     ok(allSessions().length > 0, "календарь пуст");
+
+    /* 9б. лимит времени: тренировки собираются в 40 минут на реальных уровнях,
+       урезка не трогает максимум и не убивает ни одно упражнение целиком,
+       а корпус и вис действительно зависят от теста */
+    S = blank();
+    var LEVELS = [[0,8,20],[0,15,40],[3,20,40],[6,30,60],[10,40,80],[15,50,90]];
+    LEVELS.forEach(function(lv){
+      [20,60,120].forEach(function(pl){
+        S.cycles[0] = {pull:lv[0], push:lv[1], squat:lv[2], plank:pl, hang:20};
+        for(var w=1; w<=CFG.cycleWeeks; w++) DAYS.forEach(function(d){
+          var ss = buildSession(0,w,d.k);
+          if(ss.test) return;
+          /* до уровня 6/30/60 обязаны влезать; выше программа сама велит
+             усложнять движение весом, и честно показывает превышение */
+          if(lv[1]<=30) ok(ss.secs <= CFG.session.budget,
+             "уровень "+lv.join("/")+", неделя "+w+", "+d.nm+": "+mins(ss.secs)+" мин — больше лимита");
+          ok(ss.fit.over === (ss.secs > CFG.session.budget), "флаг превышения не совпадает с расчётом");
+          var full = (function(){ var t=S.cycles[0]; var dl=(w===CFG.cycleWeeks);
+            return EX.map(function(e){ return PLANNERS[e.key]({mode:d.map[e.key], w:w, M:t[e.key], c:0, dl:dl, T:t}); }); })();
+          ss.blocks.forEach(function(b){
+            if(b.locked) return;
+            ok(b.sets.length>0, "урезка оставила пустой блок "+b.nm);
+            var bi = EX.map(function(e){ return e.key; }).indexOf(b.ex);
+            var src = bi<0 ? null : full[bi];
+            if(src){
+              var am = src.sets.filter(function(x){return x.amrap;}).length;
+              ok(b.sets.filter(function(x){return x.amrap;}).length===am, b.nm+": урезка сняла подход на максимум");
+              var gs={}; src.sets.forEach(function(x){ gs[x.g]=1; });
+              for(var g in gs) ok(b.sets.some(function(x){return x.g===g;}), b.nm+": урезка убрала группу "+g+" целиком");
+            }
+            b.sets.forEach(function(x){ ok(!/австр/i.test(x.t), b.nm+": осталось австралийское подтягивание"); });
+          });
+        });
+      });
+    });
+    /* 9в. смена цикла без отдельного теста, короткая версия, замеры */
+    S = blank();
+    S.cycles[0] = {pull:3, push:18, squat:45, plank:60, hang:25};
+    ok(buildSession(0,1,"A").test===true, "первая суббота первого цикла должна быть тестом");
+    S.log["0-2-A"] = {done:true, date:"2026-01-01", marks:{"push:0":22}, plan:[{ex:"push", sets:[{t:"МАКС", v:18, amrap:true}]}]};
+    S.log["0-4-C"] = {done:true, date:"2026-01-02", marks:{"measure:0":90}, plan:[{ex:"measure", sets:[{t:"планка", v:0, amrap:true, aux:true, m:"plank"}]}]};
+    ok(rollCycles()===true && S.cycles[1] && S.cycles[1].auto===true, "новый цикл не собрался после закрытия последней тренировки");
+    ok(S.cycles[1].push===22, "максимум не обновился по подходу МАКС");
+    ok(S.cycles[1].pull===3 && S.cycles[1].squat===45, "максимум без новых данных должен сохраниться");
+    ok(S.cycles[1].plank===90 && S.cycles[1].hang===25, "замеры планки и виса не перенеслись");
+    ok(!buildSession(1,1,"A").test, "во втором цикле отдельного теста быть не должно");
+    ok(buildSession(1,CFG.cycleWeeks,"C").blocks[0].ex==="measure", "в последней тренировке цикла нет замеров");
+    S.cycles[2] = {pull:4, push:25, squat:50, date:"2026-03-01"};
+    ok(buildSession(2,1,"A").test===true, "цикл с ручным тестом из старой версии должен остаться с тестом");
+    S.log["1-2-A"] = {short:true, marks:{}};
+    var sh = buildSession(1,2,"A");
+    ok(sh.short && sh.secs <= SHORT.budget, "короткая версия длиннее "+mins(SHORT.budget)+" минут");
+    ok(sh.blocks.every(function(b){ return b.ex!=="extra" && b.sets.length>=2 && b.sets.every(function(x){ return !x.amrap; }); }),
+       "короткая версия: должно быть 2–3 обычных подхода на упражнение без максимумов и допблока");
+    S.cycles = [{pull:2, push:18, squat:45, plank:60, hang:25}];
+    var p1 = pullPlan({mode:"A", w:2, M:2, c:0, dl:false, T:S.cycles[0]});
+    ok(p1.sets.filter(function(x){ return !x.aux; }).every(function(x){ return x.v===1; }), "фаза 1: подходы должны быть на повторение меньше максимума");
+    ok(pullPlan({mode:"A", w:3, M:2, c:0, dl:false, T:S.cycles[0]}).sets[0].amrap===true, "фаза 1, неделя 3: нет подхода на максимум");
+    ok(pullPlan({mode:"C", w:2, M:8, c:0, dl:false, T:S.cycles[0]}).sets.filter(function(x){ return x.g==="band"; }).length===3, "фаза 2: нет трёх подходов тяги резинки");
+
+    ok(hollowSec(20,1,false) < hollowSec(120,1,false), "полая позиция не зависит от планки");
+    ok(sidePlankSec(20,1,false) < sidePlankSec(120,1,false), "боковая планка не зависит от планки");
+    ok(negSec(5) < negSec(40), "негативы не зависят от виса");
+    ok(hollowSec(null,1,false,3)===35, "без планки корпус должен идти по старой схеме");
 
     /* 10. меню: на каждый день недели есть план, все продукты существуют в базе,
        дневной итог в разумных пределах вокруг цели (не переписанная вручную цифра —
