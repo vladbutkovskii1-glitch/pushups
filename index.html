@@ -12,8 +12,8 @@
 try{ var th=localStorage.getItem("trener3-theme"); if(th==="light"||th==="dark") document.documentElement.setAttribute("data-theme", th); }catch(e){}
 </script>
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./icon-192.png">
-<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" href="./icon-192-v2.png">
+<link rel="apple-touch-icon" href="./icon-192-v2.png">
 <title>Три упражнения</title>
 <style>
 :root{
@@ -181,6 +181,18 @@ button.btn:disabled{opacity:.35}
   font-family:var(--mono);font-size:16px;border-radius:0}
 .pr input:focus{outline:2px solid var(--amber);outline-offset:-1px}
 .pr .sum{margin-left:auto;color:var(--ink)}
+.exl{list-style:none;margin:12px 0 4px;padding:0;border-top:1px solid var(--line)}
+.exl li{display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer;font-size:15px}
+.exl li.nolink{cursor:default}
+.exl li b{font-weight:700;white-space:nowrap}
+.exl li .d{flex:1;color:var(--muted);font-size:13px;font-family:var(--mono);line-height:1.35}
+.exl li .st{font-family:var(--mono);font-size:13px;color:var(--muted);white-space:nowrap}
+.exl li.ok .st{color:var(--green);font-weight:700}
+.exl li.off{opacity:.5}
+.swp{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.swp button{font-family:var(--mono);font-size:12.5px;padding:7px 10px;background:none;color:var(--muted);
+  border:1px solid var(--line);cursor:pointer}
+.swp button:active{border-color:var(--amber);color:var(--ink)}
 .wu{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
 .wu summary{font-family:var(--mono);font-size:14px;cursor:pointer;color:var(--ink)}
 .wu ol{margin:8px 0 0;padding-left:22px;font-size:15.5px;line-height:1.5;color:var(--muted)}
@@ -500,6 +512,7 @@ var QUOTES = [
        body:{ h, age, act, w:{ "ГГГГ-ММ-ДД": кг } },
        food:{ adj: ккал, date: "..." },   // ручная поправка к норме калорий и когда её меняли
        morning:{ "ГГГГ-ММ-ДД": 1 },       // дни, когда сделана утренняя зарядка
+       // log[id].swap = { pull|push|squat|extra|measure: "sub" | "skip" } — замена или пропуск упражнения
        prices:{ ключ_продукта: грн },     // свои цены из списка покупок: за кг, за литр, яйца — за десяток
        awards:{ "идентификатор": "ГГГГ-ММ-ДД" },
        pending:[ идентификаторы знаков, которые ещё не показаны ],
@@ -1097,6 +1110,47 @@ function rollCycles(){
   return changed;
 }
 
+/* ── ПРОПУСК И ЗАМЕНА УПРАЖНЕНИЯ ──
+   Выбор хранится в логе тренировки: L.swap = {ex: "sub" | "skip"}.
+   Применяется в buildSession до подгонки под лимит времени, поэтому время
+   тренировки считается уже с заменой. Все подходы замены — aux: в счётчики,
+   тоннаж, рекорды и максимум цикла они не идут. Пропуск тоже ничего
+   не снижает: максимум цикла вниз не уходит никогда.
+   Корпус и замеры можно только пропустить — заменять их нечем и незачем. */
+var SWAP = {
+  pull: {btn:"Дождь / нет турника", name:"Резинка вместо турника", make:function(b){
+    var n = b.mode==="B" ? 5 : (b.mode==="A" ? 4 : 3), r = b.mode==="A" ? 10 : 12, a=[], i;
+    for(i=0;i<n;i++) a.push(R(r+" тяга", r, SPR.band, {small:true, aux:true, g:"row"}));
+    for(i=0;i<2;i++) a.push(R("15 развед.", 15, 2, {small:true, aux:true, g:"apart"}));
+    return {sets:a, rest:60,
+      tip: BAND_TIP+" <b>Разведение резинки</b> — держишь резинку перед собой на прямых руках на уровне плеч и разводишь в стороны до груди, сводя лопатки. Вис и негативы сегодня не делаются: их заменить нечем, и один такой день на прогресс не влияет."};
+  }},
+  push: {btn:"Руки устали — облегчить", name:"Облегчённо: от стола", make:function(b){
+    var r = Math.max(5, Math.round(b.M*0.5)), a=[], i;
+    for(i=0;i<3;i++) a.push(R(r+" стол", r, SPR.push, {small:true, aux:true, g:"incl"}));
+    for(i=0;i<2;i++) a.push(R("10 лопат.", 10, SPR.scap, {small:true, aux:true, g:"scap"}));
+    return {sets:a, rest:75,
+      tip:"<b>Отжимания от стола</b> — руки на край стола или дивана, тело прямой линией от пяток до макушки. Наклон снимает примерно треть веса, поэтому подходы лёгкие: останавливайся задолго до отказа. Если ноют запястья — упирайся на кулаки. <b>Лопаточные отжимания</b> — в упоре на прямых руках сводишь и разводишь лопатки, руки не сгибаются. Задача дня — подвигать плечами и не добавить усталости."};
+  }},
+  squat:{btn:"Ноги устали — облегчить", name:"Облегчённо: на стул", make:function(b){
+    var r = Math.max(6, Math.min(12, Math.round(b.M*0.25))), a=[], i;
+    for(i=0;i<3;i++) a.push(R(r+" на стул", r, SPR.squatSlow, {small:true, aux:true, g:"box"}));
+    for(i=0;i<2;i++) a.push(R("12 мост", 12, SPR.bridge, {small:true, aux:true, g:"bridge", ra:45}));
+    return {sets:a, rest:60,
+      tip:"<b>Присед на стул</b> — медленно опускаешься, садишься полностью, на секунду расслабляешь ноги и встаёшь без рывка; руки можно вытянуть вперёд. <b>Ягодичный мостик</b> — лёжа на спине поднимаешь таз. Это не нагрузка, а поддержка: лёгкое движение восстанавливает ноги быстрее, чем полный покой. Если болит само колено, а не мышцы, — делай только мостик."};
+  }}
+};
+function applySwaps(blocks, swap){
+  if(!swap) return;
+  blocks.forEach(function(b){
+    var kind = swap[b.ex]; if(!kind || b.locked) return;
+    if(kind==="skip"){ b.sets=[]; b.swap="skip"; b.modeName="пропущено"; delete b.keep; return; }
+    var d = SWAP[b.ex]; if(!d) return;
+    var p = d.make(b);
+    b.sets=p.sets; b.rest=p.rest; b.tip=p.tip; b.swap="sub"; b.modeName=d.name; delete b.keep;
+  });
+}
+
 /* Живая сборка тренировки по текущему коду. */
 function buildSession(c,w,k){
   var day = dayByKey(k);
@@ -1115,6 +1169,7 @@ function buildSession(c,w,k){
   });
   if((k==="A"||k==="C") && mOf(c,"squat")!==null) out.blocks.push(extraPlan(w,k,c,T));
   if(dl && k===DAYS[DAYS.length-1].k && cycleSet(c)) out.blocks.unshift(measurePlan(T));
+  applySwaps(out.blocks, S.log[out.id] && S.log[out.id].swap);
   if(short){
     out.short = true; out.fit = null;
     out.secs = shortFit(out.blocks);
@@ -1131,7 +1186,7 @@ function freezeBlocks(live){
   return (live.blocks||[]).map(function(b){
     if(b.locked) return {ex:b.ex, nm:b.nm, locked:true};
     return {ex:b.ex, nm:b.nm, modeName:b.modeName, mode:b.mode, M:b.M,
-            phase:b.phase, rest:b.rest,
+            phase:b.phase, rest:b.rest, swap:b.swap||null,
             sets:(b.sets||[]).map(function(x){
               return {t:x.t, v:x.v, aux:!!x.aux, amrap:!!x.amrap,
                       est:(x.est==null?null:x.est), small:!!x.small,
@@ -1156,7 +1211,7 @@ function getSession(c,w,k){
     s.blocks = L.plan.map(function(fb){
       var live = s.blocks.filter(function(b){ return b.ex===fb.ex; })[0] || {};
       return {ex:fb.ex, nm:fb.nm, locked:fb.locked, modeName:fb.modeName, mode:fb.mode,
-              M:fb.M, phase:fb.phase, rest:fb.rest, sets:fb.sets||[],
+              M:fb.M, phase:fb.phase, rest:fb.rest, sets:fb.sets||[], swap:fb.swap||null,
               tip: live.tip || "Эта тренировка записана раньше — раскладка сохранена такой, какой ты её делал."};
     });
     s.short = !!L.short;
@@ -1851,10 +1906,10 @@ function notify(title, body){
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(function(reg){
-        reg.showNotification(title, {body:body, icon:"./icon-192.png", badge:"./icon-192.png",
+        reg.showNotification(title, {body:body, icon:"./icon-192-v2.png", badge:"./icon-192.png",
           vibrate:[120,80,120], tag:"rest", renotify:true});
       }).catch(function(){});
-    } else { new Notification(title, {body:body, icon:"./icon-192.png"}); }
+    } else { new Notification(title, {body:body, icon:"./icon-192-v2.png"}); }
   }catch(e){}
 }
 
@@ -1907,6 +1962,26 @@ function finish(){
   save(); render();
   sndDone();
 }
+/* Замена или пропуск одного упражнения. kind: "sub", "skip" или null — вернуть. */
+function setSwap(ex, kind){
+  var r=currentRef(), L=logOf(r.id);
+  if(L.done) return;
+  var mine = Object.keys(L.marks).filter(function(k){ return k.split(":")[0]===ex; });
+  if(mine.length && !confirm("Отметки по этому упражнению сбросятся. Продолжить?")) return;
+  mine.forEach(function(k){ delete L.marks[k]; });
+  if(!L.swap) L.swap={};
+  if(kind) L.swap[ex]=kind; else delete L.swap[ex];
+  /* Начатая тренировка заморожена — переписываем в снимке только этот блок. */
+  if(L.plan){
+    var lb = buildSession(r.c,r.w,r.k).blocks.filter(function(b){ return b.ex===ex; })[0];
+    if(lb){
+      var fz = freezeBlocks({blocks:[lb]})[0];
+      for(var i=0;i<L.plan.length;i++) if(L.plan[i].ex===ex) L.plan[i]=fz;
+    }
+  }
+  save(); redrawToday();
+}
+function goToday(){ S.view=null; save(); render(); window.scrollTo(0,0); }
 function setShort(on){
   var r=currentRef(), L=logOf(r.id);
   if(L.plan || L.done) return;           /* начатую тренировку не перекраиваем */
@@ -2098,10 +2173,13 @@ function medalCard(){
 }
 
 function renderToday(){
+  if(!S.view && isRestDay()){ renderRestDay(); return; }
   var r=currentRef(), s=getSession(r.c,r.w,r.k), L=S.log[s.id]||{marks:{}}, t=today();
   var marks = L.marks || {};
   var when = s.date===t ? "Сегодня" : (s.date<t ? "Пропущено · "+fmt(s.date) : fmt(s.date));
   var h = medalCard() + moodCard();
+  if(S.view && s.date!==t)
+    h+='<button class="btn ghost sm" style="margin:0 0 12px" onclick="goToday()">← К сегодняшнему дню</button>';
 
   h+='<div class="card"><div class="eyebrow">'+when+' · '+s.dayName+' · цикл '+(s.c+1)+' · неделя '+s.w+'</div>';
 
@@ -2132,6 +2210,17 @@ function renderToday(){
   var started = !!(L.plan || L.done);
   h+='<h2>'+s.dayName+(s.short?' · короткая':'')+'</h2><div class="meta">упражнения по порядку сверху вниз'+
      (s.secs ? ' · ≈ '+mins(s.secs)+' мин' : '')+'</div>';
+  /* список упражнений дня со статусом; нажатие — прокрутка к упражнению */
+  h+='<ol class="exl">';
+  s.blocks.forEach(function(b){
+    var n=(b.sets||[]).length, d=0;
+    (b.sets||[]).forEach(function(x,i){ if(marks[markKey(b.ex,i)]!=null) d++; });
+    var st = b.locked ? "" : (b.swap==="skip" ? "—" : (n && d===n ? "✓" : d+"/"+n));
+    var cls = (b.locked||b.swap==="skip") ? ' off' : (n && d===n ? ' ok' : '');
+    h+='<li class="'+cls+'" onclick="var e=document.getElementById(\'blk_'+b.ex+'\'); if(e) e.scrollIntoView({behavior:\'smooth\', block:\'start\'})">'+
+       '<b>'+b.nm+'</b><span class="d">'+blockDetail(b, s.c)+'</span><span class="st">'+st+'</span></li>';
+  });
+  h+='</ol>';
   if(s.short)
     h+='<div class="note">Короткая версия: по 2–3 подхода основной работы, без максимумов и допблока. Лучше так, чем пропуск.</div>';
   else if(s.fit && s.fit.over)
@@ -2160,12 +2249,18 @@ function renderToday(){
 
   var totDone=0, totAll=0, reps=0;
   s.blocks.forEach(function(b){
-    h+='<div class="card">';
+    h+='<div class="card" id="blk_'+b.ex+'">';
     if(b.locked){
       h+='<div class="exhead"><h3 class="ex">'+b.nm+'<em>'+(s.c===0?'ждёт теста':'ждёт итогов цикла')+'</em></h3></div>';
       h+='<div class="note">'+(s.c===0 ? 'Сдай стартовый тест — он в первой субботе.'
             : 'Откроется, когда закроешь последнюю тренировку текущего цикла или когда наступит дата начала нового.')+'</div></div>';
       return;
+    }
+    if(b.swap==="skip"){
+      h+='<div class="exhead"><h3 class="ex">'+b.nm+'<em>пропущено</em></h3></div>';
+      h+='<div class="note">Сегодня без него. На прогресс один пропуск не влияет: максимум не снижается, следующая тренировка пойдёт по плану.</div>';
+      if(!L.done) h+=swapRow(b);
+      h+='</div>'; return;
     }
     var done=0;
     b.sets.forEach(function(x,i){
@@ -2174,8 +2269,10 @@ function renderToday(){
     });
     totDone+=done; totAll+=b.sets.length;
     h+='<div class="exhead"><h3 class="ex">'+b.nm+'<em>'+b.modeName+'</em></h3>';
-    h+='<div class="meta">'+b.sets.length+' подх. · макс '+b.M+
-       (b.phase!==undefined && b.phase!==null ? ' · фаза '+b.phase : '')+'</div></div>';
+    h+='<div class="meta">'+b.sets.length+' подх. · '+
+       (b.swap==="sub" ? 'замена, в счёт не идёт'
+                       : 'макс '+b.M+(b.phase!==undefined && b.phase!==null ? ' · фаза '+b.phase : ''))+'</div></div>';
+    if(!L.done) h+=swapRow(b);
     h+='<div class="sets">';
     var open = firstOpen(b, marks);
     b.sets.forEach(function(x,i){
@@ -2219,6 +2316,80 @@ function renderToday(){
   drawRest();
   if(restLeft()>0) runTick();
 }
+/* Короткая запись блока: «сила: 4×3, макс». Общая для «Плана» и «Сегодня». */
+function blockDetail(b, c){
+  if(b.locked) return (c===0 ? "ждёт теста" : "ждёт итогов цикла");
+  if(b.swap==="skip") return "пропущено";
+  if(b.ex==="measure") return "планка и вис";
+  var runs=[];
+  (b.sets||[]).forEach(function(x){
+    var key = x.amrap ? "макс" : x.t;
+    if(runs.length && runs[runs.length-1].k===key) runs[runs.length-1].n++;
+    else runs.push({k:key, n:1});
+  });
+  var txt=runs.map(function(rr){
+    if(rr.n===1) return rr.k;
+    return /^[0-9]+$/.test(rr.k) ? (rr.n+"×"+rr.k) : (rr.n+" подх. по "+rr.k);
+  }).join(", ");
+  var mode = b.swap==="sub" ? b.modeName : (MODE[b.mode]||b.modeName||"");
+  return String(mode).toLowerCase()+": "+txt;
+}
+function swapRow(b){
+  var h='<div class="swp">';
+  if(b.swap) h+='<button onclick="setSwap(\''+b.ex+'\',null)">↺ Вернуть как было</button>';
+  else{
+    if(SWAP[b.ex]) h+='<button onclick="setSwap(\''+b.ex+'\',\'sub\')">'+SWAP[b.ex].btn+'</button>';
+    h+='<button onclick="setSwap(\''+b.ex+'\',\'skip\')">Пропустить</button>';
+  }
+  return h+'</div>';
+}
+
+/* ── ВЫХОДНОЙ ──
+   В дни без тренировки «Сегодня» показывает выходной, а не следующую
+   тренировку. Если последняя тренировка не закрыта и с неё прошло не больше
+   двух дней — предлагает доделать её сегодня.                           */
+var WDF=["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"];
+var WDA=["воскресенье","понедельник","вторник","среду","четверг","пятницу","субботу"];  /* «за среду» */
+function isRestDay(){
+  var t=today();
+  return !allSessions().some(function(s){ return s.date===t; });
+}
+function renderRestDay(){
+  var t=today(), all=allSessions();
+  var next = all.filter(function(s){ return s.date>t; })[0];
+  var past = all.filter(function(s){ return s.date<t; });
+  var last = past[past.length-1];
+  var missed = (last && !(S.log[last.id] && S.log[last.id].done) && daysBetween(last.date,t)<=2) ? last : null;
+  var wd = WDF[s2d(t).getUTCDay()];
+  var h = medalCard() + moodCard();
+
+  h+='<div class="card"><div class="eyebrow">Сегодня · '+wd+' · '+fmt(t)+'</div><h2>Выходной</h2>';
+  h+='<div class="note">Мышцы растут в дни отдыха, а не на турнике. Сегодня — зарядка, прогулка и нормальная еда.</div>';
+  if(missed){
+    var tomorrow = next && daysBetween(t, next.date)===1;
+    h+='<div class="warn">Тренировка за '+WDA[s2d(missed.date).getUTCDay()]+' не закрыта. Её можно сделать сегодня'+
+       (tomorrow ? ' — но завтра уже следующая, поэтому лучше короткую версию.' : '.')+'</div>';
+    h+='<button class="btn" onclick="openS(\''+missed.id+'\')">Сделать сегодня</button>';
+  }
+  h+='</div>';
+
+  if(next){
+    var ns=getSession(next.c,next.w,next.k);
+    h+='<div class="card"><div class="eyebrow">Следующая тренировка</div>';
+    h+='<h2>'+WDF[s2d(next.date).getUTCDay()].replace(/^./, function(ch){ return ch.toUpperCase(); })+', '+fmt(next.date)+'</h2>';
+    h+='<div class="meta">'+(ns.test ? 'тест максимумов' : 'цикл '+(next.c+1)+' · неделя '+next.w+(ns.secs?' · ≈ '+mins(ns.secs)+' мин':''))+'</div>';
+    if(!ns.test){
+      h+='<ol class="exl">';
+      ns.blocks.forEach(function(b){
+        h+='<li class="nolink'+(b.swap==="skip"||b.locked?' off':'')+'"><b>'+b.nm+'</b><span class="d">'+blockDetail(b, next.c)+'</span></li>';
+      });
+      h+='</ol>';
+    }
+    h+='<button class="btn ghost sm" onclick="openS(\''+next.id+'\')">Открыть заранее</button></div>';
+  }
+  document.getElementById("v0").innerHTML=h;
+}
+
 /* Первый неотмеченный подход блока — он и подсвечивается как текущий.
    Ровно один на блок: раньше при пустом блоке подсвечивались все сразу. */
 function firstOpen(b, marks){
@@ -2245,19 +2416,7 @@ function renderPlan(){
       else{
         h+='<div class="lines">';
         s.blocks.forEach(function(b){
-          if(b.locked){ h+=b.nm.toLowerCase()+" — "+(c===0?"ждёт теста":"ждёт итогов цикла")+"<br>"; return; }
-          if(b.ex==="measure"){ h+="замеры: планка и вис<br>"; return; }
-          var runs=[];
-          b.sets.forEach(function(x){
-            var key = x.amrap ? "макс" : x.t;
-            if(runs.length && runs[runs.length-1].k===key) runs[runs.length-1].n++;
-            else runs.push({k:key, n:1});
-          });
-          var txt=runs.map(function(rr){
-            if(rr.n===1) return rr.k;
-            return /^[0-9]+$/.test(rr.k) ? (rr.n+"×"+rr.k) : (rr.n+" подх. по "+rr.k);
-          }).join(", ");
-          h+=b.nm.toLowerCase()+" · "+String(MODE[b.mode]||b.modeName||"").toLowerCase()+": "+txt+"<br>";
+          h+=b.nm.toLowerCase()+(b.locked||b.swap==="skip"||b.ex==="measure" ? " — " : " · ")+blockDetail(b, c)+"<br>";
         });
         h+='</div>';
       }
@@ -2795,6 +2954,30 @@ function selfTest(){
     ok(p1.sets.filter(function(x){ return !x.aux; }).every(function(x){ return x.v===1; }), "фаза 1: подходы должны быть на повторение меньше максимума");
     ok(pullPlan({mode:"A", w:3, M:2, c:0, dl:false, T:S.cycles[0]}).sets[0].amrap===true, "фаза 1, неделя 3: нет подхода на максимум");
     ok(pullPlan({mode:"C", w:2, M:8, c:0, dl:false, T:S.cycles[0]}).sets.filter(function(x){ return x.g==="band"; }).length===3, "фаза 2: нет трёх подходов тяги резинки");
+
+    /* 9г. замена и пропуск упражнения */
+    S = blank();
+    S.cycles[0] = {pull:3, push:18, squat:45, plank:60, hang:25};
+    var sw0 = buildSession(0,2,"A");
+    S.log["0-2-A"] = {done:false, marks:{}, swap:{pull:"sub", squat:"skip"}};
+    var sw1 = buildSession(0,2,"A");
+    var bp = sw1.blocks.filter(function(b){ return b.ex==="pull"; })[0];
+    var bq = sw1.blocks.filter(function(b){ return b.ex==="squat"; })[0];
+    ok(bp.swap==="sub" && bp.sets.length>0 && bp.sets.every(function(x){ return x.aux && !x.amrap; }),
+       "замена: все подходы должны быть подводящими, без максимума");
+    ok(bq.swap==="skip" && bq.sets.length===0, "пропуск: у упражнения не должно остаться подходов");
+    ok(sw1.secs < sw0.secs, "с пропуском тренировка должна стать короче");
+    ok(sw1.secs <= CFG.session.budget, "тренировка с заменой длиннее лимита");
+    bp.sets.forEach(function(x,i){ S.log["0-2-A"].marks["pull:"+i]=x.v; });
+    S.log["0-2-A"].plan = freezeBlocks(sw1); S.log["0-2-A"].done = true;
+    ok(exReps().pull===0, "подходы замены попали в счётчик подтягиваний");
+    ok(amrapBest("pull", 0)===null, "замена повлияла на максимум цикла");
+    ok(getSession(0,2,"A").blocks.filter(function(b){ return b.ex==="squat"; })[0].swap==="skip",
+       "пропуск не сохранился в замороженной тренировке");
+    ["push","squat"].forEach(function(k){
+      var b={ex:k, mode:"B", M:20}, p=SWAP[k].make(b);
+      ok(p.sets.every(function(x){ return x.aux; }), k+": облегчённый вариант должен быть подводящим");
+    });
 
     ok(hollowSec(20,1,false) < hollowSec(120,1,false), "полая позиция не зависит от планки");
     ok(sidePlankSec(20,1,false) < sidePlankSec(120,1,false), "боковая планка не зависит от планки");

@@ -1,16 +1,16 @@
 /* Офлайн-кэш приложения.
    Меняешь index.html — подними номер версии на строке ниже,
    иначе телефон может продолжить показывать старую копию. */
-const VERSION = "v21";
+const VERSION = "v23";
 const CACHE = "trener3-" + VERSION;
 
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icon-192.png",
-  "./icon-512.png",
-  "./icon-maskable-512.png"
+  "./icon-192-v2.png",
+  "./icon-512-v2.png",
+  "./icon-maskable-512-v2.png"
 ];
 
 self.addEventListener("install", (e) => {
